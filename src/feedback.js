@@ -46,9 +46,17 @@ export function updateFeedback(db, id, { status, reply } = {}, actor) {
   return { ok: true, feedback: db.prepare("SELECT * FROM feedback WHERE id = ?").get(id) };
 }
 
-// The key check for Claude's access. No FEEDBACK_KEY set: the endpoint is closed.
+// The key for Claude's access: FEEDBACK_KEY when set, otherwise one made from GOOGLE_MAPS_API_KEY. The server and
+// Claude's cloud sessions both hold that key already, so the check works with nothing new to set up, and the maps
+// key itself is never sent. Neither set: the endpoint is closed.
+export function feedbackKey(env) {
+  if (env.FEEDBACK_KEY) return env.FEEDBACK_KEY;
+  if (env.GOOGLE_MAPS_API_KEY) return crypto.createHmac("sha256", env.GOOGLE_MAPS_API_KEY).update("driver-dispatch feedback").digest("base64url");
+  return null;
+}
+
 export function keyAllowed(req, env) {
-  const want = env.FEEDBACK_KEY;
+  const want = feedbackKey(env);
   const m = /^Bearer (.+)$/.exec(req.get("authorization") || "");
   if (!want || !m) return false;
   const a = crypto.createHash("sha256").update(m[1]).digest();

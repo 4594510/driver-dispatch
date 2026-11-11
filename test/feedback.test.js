@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/server.js";
 import { openDb } from "../src/db.js";
+import { feedbackKey } from "../src/feedback.js";
 
 async function withServer(fn, env = {}) {
   const db = openDb(":memory:");
@@ -69,6 +70,17 @@ test("without FEEDBACK_KEY Claude's endpoint stays closed", async () => {
     assert.equal((await call("/api/feedback", "GET", undefined, { authorization: "Bearer " })).status, 403);
     assert.equal((await call("/api/feedback", "GET", undefined, claude)).status, 403);
   }, { FEEDBACK_KEY: "" });
+});
+
+test("without FEEDBACK_KEY the key is made from the maps key, and works", async () => {
+  const key = feedbackKey({ GOOGLE_MAPS_API_KEY: "maps-secret" });
+  assert.ok(key.length > 30 && !key.includes("maps-secret"));
+  assert.equal(feedbackKey({ FEEDBACK_KEY: "own", GOOGLE_MAPS_API_KEY: "maps-secret" }), "own");
+  assert.equal(feedbackKey({}), null);
+  await withServer(async (call) => {
+    assert.equal((await call("/api/feedback", "GET", undefined, { authorization: `Bearer ${key}` })).status, 200);
+    assert.equal((await call("/api/feedback", "GET", undefined, { authorization: "Bearer maps-secret" })).status, 403);
+  }, { FEEDBACK_KEY: "", GOOGLE_MAPS_API_KEY: "maps-secret" });
 });
 
 test("the driver sends feedback from the app, once per key, and sees only their own", async () => {
