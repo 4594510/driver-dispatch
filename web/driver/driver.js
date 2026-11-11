@@ -251,12 +251,15 @@ function mapsWeb(s) {
   return `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`;
 }
 
+// The admin's priority level for a rider (High or Top); nothing for normal.
+const prioBadge = (x) => (x?.priority > 0 ? ` <span class="prio p${x.priority}">${esc(x.priority_label || "High")} priority</span>` : "");
+
 function stopCard(s, big) {
   const pickup = s.kind === "pickup";
   const late = pickup && s.window && s.arrive > s.window[1];
   return `<div class="card ${big ? "next" : ""}">
     <div class="kind ${s.kind}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}${late ? ' <span class="late">late</span>' : ""}</div>
-    <h2>${esc(s.rider_name || "Ride")}</h2>
+    <h2>${esc(s.rider_name || "Ride")}${prioBadge(s)}</h2>
     <div class="addr">${esc(s.address)}</div>
     <div class="quiet">${people(s)}${pickup && s.window ? ` · window ${minuteText(s.window[0])}–${minuteText(s.window[1])}` : ""}${s.together ? " · may sit together" : ""}</div>
     ${s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
@@ -286,7 +289,7 @@ function requestsView() {
   if (!list.length) return '<div class="card"><p class="quiet">No requests waiting.</p></div>';
   return list.map((r) => `<div class="card">
     <div class="kind">${r.status === "proposed" ? `New time offered: ${minuteText(r.proposed_minute)} (waiting for the caller)` : "Request"}${r.return_of ? " · return trip" : ""}</div>
-    <h2>${esc(r.rider_name || "Ride")}</h2>
+    <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     <div>${esc(r.from)} → ${esc(r.to)}</div>
     <div class="quiet">${people(r)} · ${minuteText(r.window[0])}–${minuteText(r.window[1])}${r.together ? " · may sit together" : ""}</div>
     <div class="actions">
@@ -308,7 +311,7 @@ function dayView() {
       return `<div class="stop ${done ? "done" : ""}">
         <div class="time">${editing ? "" : minuteText(s.arrive)}</div>
         <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-          <b>${esc(s.rider_name)}</b> · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
+          <b>${esc(s.rider_name)}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
         ${editing ? `<div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>` : ""}
       </div>`;
     }).join("")}
@@ -346,13 +349,18 @@ async function preview(id) {
   const p = r.data;
   const shiftRows = Object.entries(p.shifts || {}).map(([bid, k]) => Object.entries(k).map(([kind, [a, b]]) =>
     `<tr><td>${esc(p.names[bid] || "")}</td><td>${kind === "pickup" ? "pick up" : "drop off"}</td><td>${minuteText(a)}</td><td class="${b > a ? "up" : "down"}">${minuteText(b)}</td></tr>`).join("")).join("");
-  sheet(`<h2>${esc(req?.rider_name || "Ride")}: pick up about ${minuteText(p.eta)}</h2>
+  const blocks = p.blocks || [];
+  const blockNote = blocks.length ? `<div class="notes" style="border:2px solid var(--bad)"><b>Wait:</b> if you take this ride there's no room for
+    ${blocks.map((x) => `<b>${esc(x.rider_name || "a rider")}</b> (${esc(x.label)} priority, ${minuteText(x.window[0])})`).join(", ")}, who is also waiting.
+    Higher priority goes first. <button class="ghost" data-preview="${esc(blocks[0].id)}" style="margin-top:6px">See ${esc(blocks[0].rider_name || "that ride")} first</button></div>` : "";
+  sheet(`<h2>${esc(req?.rider_name || "Ride")}${prioBadge(req)}: pick up about ${minuteText(p.eta)}</h2>
+    ${blockNote}
     <p class="quiet">Driving: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes</p>
     ${shiftRows ? `<p>Times that move:</p><table class="diff"><tbody>${shiftRows}</tbody></table>` : '<p class="quiet">Nobody else\'s time moves.</p>'}
     <p class="quiet" style="margin-top:12px">The new route:</p>
     ${p.after.stops.map((s) => `<div class="stop"><div class="time">${minuteText(s.arrive)}</div><div class="body">${s.kind === "pickup" ? "Pick up" : "Drop off"} <b>${esc(p.names[s.booking_id] || "")}</b>${s.booking_id === id ? " (new)" : ""}</div></div>`).join("")}
     <div class="actions"><button class="bad" data-act="reject" data-id="${id}">Reject</button><button class="ghost" data-propose="${id}">Suggest a time</button>
-    <button class="good big wide" data-act="accept" data-id="${id}">Accept</button><button class="ghost wide" data-close>Close</button></div>`);
+    <button class="${blocks.length ? "bad" : "good"} big wide" data-act="accept" data-id="${id}">${blocks.length ? "Accept anyway" : "Accept"}</button><button class="ghost wide" data-close>Close</button></div>`);
 }
 
 function proposeSheet(id) {

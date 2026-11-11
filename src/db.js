@@ -236,6 +236,20 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       at TEXT NOT NULL,
       result TEXT NOT NULL
     );
+    -- Priority levels an admin sets for a family (passenger_id NULL) or one person, always or between two local
+    -- times ("2026-11-12T10:00"; NULL = no start or no end). See priority.js.
+    CREATE TABLE IF NOT EXISTS priorities (
+      id TEXT PRIMARY KEY,
+      household_id TEXT NOT NULL REFERENCES households(id),
+      passenger_id TEXT REFERENCES passengers(id),
+      level INTEGER NOT NULL,                    -- 1 High, 2 Top (0 Normal is no rule)
+      starts_at TEXT,
+      ends_at TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1
+    );
   `);
   return db;
 }

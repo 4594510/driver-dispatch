@@ -65,3 +65,5 @@ button:disabled { opacity: .5; }
 .toast { position: fixed; left: 16px; right: 16px; bottom: 20px; background: #222; color: #fff; padding: 12px 14px; border-radius: 10px; z-index: 6; text-align: center; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { flex: 1; min-width: 72px; }
+.prio { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 2px 8px; border-radius: 99px; font-size: 13px; font-weight: 700; background: #fbeed9; color: #6b3d00; }
+.prio.p2 { background: var(--bad); color: #fff; }

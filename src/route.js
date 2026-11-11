@@ -1,8 +1,9 @@
 // Route planning (stage 3): the order of stops for one vehicle's day, with arrival times and seats.
 //
-// A ride is { id, men, women, together, seats?, windowStart, windowEnd, from, to, onBoard, pickedUpAt? }:
+// A ride is { id, men, women, together, seats?, windowStart, windowEnd, from, to, onBoard, pickedUpAt?, priority? }:
 // from/to are point keys (travel.js), the window is the promised pickup window in minutes after midnight, onBoard
-// means the driver already picked them up (only the drop-off is left, and their seats can't change).
+// means the driver already picked them up (only the drop-off is left, and their seats can't change). priority is the
+// admin's level for the rider (0 normal, 1 high, 2 top; priority.js): their waiting counts more when choosing an order.
 //
 // A route is a list of stops [{ ride, kind: "pickup" | "dropoff" }]. Timing walks the stops: the driver waits at a
 // pickup until its window opens; a pickup reached after its window closes is late; a rider on board longer than the
@@ -97,12 +98,15 @@ function withinAllowance(timing, allow) {
   return true;
 }
 
-// Lower is better: driving time, plus a little for every minute a pickup is later than its window opens.
+// Lower is better: driving time, plus a little for every minute a pickup is later than its window opens. A minute of
+// waiting counts double for a high-priority rider and triple for top priority.
 function cost(timing, stops, rides) {
   const byId = new Map(rides.map((r) => [r.id, r]));
   let waitPast = 0;
   stops.forEach((s, i) => {
-    if (s.kind === "pickup") waitPast += timing.times[i].arrive - byId.get(s.ride).windowStart;
+    if (s.kind !== "pickup") return;
+    const r = byId.get(s.ride);
+    waitPast += (timing.times[i].arrive - r.windowStart) * (1 + (r.priority || 0));
   });
   return timing.drive + 0.1 * waitPast;
 }
@@ -131,11 +135,12 @@ export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT) {
   return { ok: false, reason: "no_seats" };
 }
 
-// Build a day's route from nothing: riders on board first (their drop-offs), then everyone else in pickup-time order.
+// Build a day's route from nothing: riders on board first (their drop-offs), then everyone else in pickup-time order
+// (higher priority first among the same pickup time, so they get the better places).
 export function buildRoute(rides, ctx, layout = DEFAULT_LAYOUT) {
   let stops = [];
   const placed = [];
-  const order = [...rides].sort((a, b) => (b.onBoard ? 1 : 0) - (a.onBoard ? 1 : 0) || a.windowStart - b.windowStart);
+  const order = [...rides].sort((a, b) => (b.onBoard ? 1 : 0) - (a.onBoard ? 1 : 0) || a.windowStart - b.windowStart || (b.priority || 0) - (a.priority || 0));
   for (const r of order) {
     if (r.onBoard) {
       // Drop-offs of riders on board: insert only the drop-off, at the best place.

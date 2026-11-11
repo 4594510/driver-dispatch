@@ -44,6 +44,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
 - src/settings.js: hours, areas, trip limit stored in the database.
+- src/priority.js: priority levels (Normal, High, Top) an admin sets for a family or one person, always or for a
+  local time range. Used by dispatch.js: the driver's requests are sorted by it, the accept preview warns when a ride
+  would leave no room for a waiting higher-priority one, and the planner weighs higher-priority waiting more. It never
+  moves an accepted ride later.
 - src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
   and miles from GPS) and announcements (deliveries queued until the phone line is connected).
 - web/: the admin dashboard (plain JS, one page).
