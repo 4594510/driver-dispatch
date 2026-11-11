@@ -226,16 +226,20 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   admin.delete("/passengers/:id", (req, res) => {
     db.prepare("UPDATE passengers SET active = 0 WHERE id = ?").run(req.params.id);
+    // Their phone stays approved and goes back to the whole family.
+    db.prepare("UPDATE phones SET passenger_id = NULL WHERE passenger_id = ?").run(req.params.id);
     audit(db, req.actor, "passenger_removed", null, { id: req.params.id });
     res.json({ ok: true });
   });
 
   admin.post("/phones", (req, res) => {
     const number = normalizePhone(req.body.number);
-    const { householdId, passengerId = null, notify = "both" } = req.body;
+    const { householdId, notify = "both" } = req.body;
+    const passengerId = req.body.passengerId || null;
     if (!number || !PHONE.test(number)) return bad(res, "Enter a 10-digit US phone number.");
     if (!NOTIFY.includes(notify)) return bad(res, "Choose text, voice or both.");
     if (!db.prepare("SELECT 1 FROM households WHERE id = ? AND active = 1").get(householdId)) return bad(res, "Unknown family.");
+    if (passengerId && !personOf(householdId, passengerId)) return bad(res, "That person isn't in this family.");
     const existing = db.prepare("SELECT * FROM phones WHERE number = ?").get(number);
     if (existing?.active) return bad(res, "That number is already approved.");
     if (existing) {
@@ -246,11 +250,17 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     audit(db, req.actor, "phone_added", null, { number });
     res.json({ ok: true, number });
   });
+  // A phone belongs to a whole family, or to one person in it (then "for myself" on the phone means that person).
+  const personOf = (householdId, passengerId) => db.prepare("SELECT 1 FROM passengers WHERE id = ? AND household_id = ? AND active = 1").get(passengerId, householdId);
   admin.patch("/phones/:number", (req, res) => {
-    const notify = req.body.notify;
+    const phone = db.prepare("SELECT * FROM phones WHERE number = ? AND active = 1").get(req.params.number);
+    if (!phone) return bad(res, "Unknown phone.");
+    const notify = req.body.notify ?? phone.notify;
     if (!NOTIFY.includes(notify)) return bad(res, "Choose text, voice or both.");
-    db.prepare("UPDATE phones SET notify = ? WHERE number = ?").run(notify, req.params.number);
-    audit(db, req.actor, "phone_changed", null, { number: req.params.number, notify });
+    const passengerId = req.body.passengerId !== undefined ? req.body.passengerId || null : phone.passenger_id;
+    if (passengerId && !personOf(phone.household_id, passengerId)) return bad(res, "That person isn't in this family.");
+    db.prepare("UPDATE phones SET notify = ?, passenger_id = ? WHERE number = ?").run(notify, passengerId, phone.number);
+    audit(db, req.actor, "phone_changed", null, { number: phone.number, notify, passengerId });
     res.json({ ok: true });
   });
   admin.delete("/phones/:number", (req, res) => {

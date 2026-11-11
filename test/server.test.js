@@ -73,6 +73,33 @@ test("families, phones and places are managed, with place codes kept unique per 
   });
 });
 
+test("a phone belongs to a whole family or to one person in it", async () => {
+  await withServer(async (call) => {
+    await signIn(call);
+    const hh = (await call("/api/admin/households", "POST", { name: "Family A" })).body.id;
+    const other = (await call("/api/admin/households", "POST", { name: "Family B" })).body.id;
+    const ps = (await call("/api/admin/passengers", "POST", { householdId: hh, name: "Rider", gender: "m" })).body.id;
+    const stranger = (await call("/api/admin/passengers", "POST", { householdId: other, name: "Other", gender: "m" })).body.id;
+    assert.equal((await call("/api/admin/phones", "POST", { number: "8455550002", householdId: hh, passengerId: stranger })).status, 400, "person from another family");
+    assert.equal((await call("/api/admin/phones", "POST", { number: "8455550002", householdId: hh, passengerId: ps })).status, 200);
+    assert.equal((await call("/api/admin/phones", "POST", { number: "8455550003", householdId: hh, passengerId: "" })).status, 200);
+    let phones = (await call("/api/admin/households")).body.find((h) => h.id === hh).phones;
+    assert.equal(phones.find((p) => p.number === "+18455550002").passenger_id, ps);
+    assert.equal(phones.find((p) => p.number === "+18455550003").passenger_id, null);
+    // Move a phone to the person, then back to the family; changing only the message setting keeps the owner.
+    assert.equal((await call("/api/admin/phones/%2B18455550003", "PATCH", { passengerId: ps })).status, 200);
+    assert.equal((await call("/api/admin/phones/%2B18455550003", "PATCH", { notify: "text" })).status, 200);
+    assert.equal((await call("/api/admin/phones/%2B18455550003", "PATCH", { passengerId: stranger })).status, 400);
+    phones = (await call("/api/admin/households")).body.find((h) => h.id === hh).phones;
+    assert.deepEqual([phones.find((p) => p.number === "+18455550003").passenger_id, phones.find((p) => p.number === "+18455550003").notify], [ps, "text"]);
+    // Removing the person keeps their phone, now for the whole family.
+    await call(`/api/admin/passengers/${ps}`, "DELETE");
+    phones = (await call("/api/admin/households")).body.find((h) => h.id === hh).phones;
+    assert.equal(phones.length, 2);
+    assert.ok(phones.every((p) => p.passenger_id === null));
+  });
+});
+
 test("settings change the rules, and bad values are refused", async () => {
   await withServer(async (call) => {
     await signIn(call);

@@ -43,7 +43,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   preview, actions with once-only keys, route order). web/driver/: the app page; android/: the APK wrapper (Java,
   WebView + TrackingService for GPS and request notifications), built by .github/workflows/android.yml.
 - src/backup.js: the daily database copy. Dockerfile, railway.json, docs/going-live.md: hosting and the pilot.
-- src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/.
+- src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/. A phone
+  belongs to a whole family or to one person in it (phones.passenger_id); "for myself" on the phone books that person.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
 - src/settings.js: hours, areas, trip limit stored in the database. getSettings(db, now) puts today's schedule in.
 - src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
