@@ -27,7 +27,8 @@ const ERRORS = {
   return_before_pickup: "The return must be after the pickup", return_outside_hours: "The return is outside service hours",
   wrong_status: "Not possible in this ride's status", not_pending: "This ride isn't waiting for an answer",
   no_time: "The route can't reach it in time without making others late", too_far: "Longer than the trip limit",
-  closed: "No rides today (schedule)",
+  closed: "No rides today (schedule)", riders_count: "More people ticked than men and women", unknown_passenger: "Unknown person",
+  bad_people: "More people ticked than men and women",
 };
 const errorText = (c) => ERRORS[c] || c;
 
@@ -200,11 +201,12 @@ async function today() {
       <form id="book">
         <div class="row">
           <label>Caller's phone <select name="phone" required>${phones.map((p) => `<option value="${esc(p.number)}">${esc(p.family)}${p.person ? ` (${esc(p.person)})` : ""}: ${esc(phoneText(p.number))}</option>`).join("")}</select></label>
-          <label>Rider's name <input name="riderName"></label>
+          <label>Rider's name (empty = the people below) <input name="riderName"></label>
         </div>
+        <div class="row people-pick" id="book-people"></div>
         <div class="row">
-          <label>Men <input name="men" type="number" min="0" max="7" value="0"></label>
-          <label>Women <input name="women" type="number" min="0" max="6" value="0"></label>
+          <label><span class="people-only">Other </span>men <input name="men" type="number" min="0" max="7" value="0"></label>
+          <label><span class="people-only">Other </span>women <input name="women" type="number" min="0" max="6" value="0"></label>
           <label><input name="together" type="checkbox"> Men and women may sit together</label>
         </div>
         <div class="row">
@@ -244,11 +246,25 @@ async function today() {
   form.from.addEventListener("change", () => showAddress("from"));
   form.to.addEventListener("change", () => showAddress("to"));
   fillPlaces();
+  // Who is coming: the caller's family and relatives, ticked one by one.
+  let bookPeople = [];
+  const loadPeople = async () => {
+    const phone = $("#book [name=phone]").value;
+    bookPeople = phone ? await api(`/api/admin/phones/${encodeURIComponent(phone)}/people`).catch(() => []) : [];
+    $("#book-people").innerHTML = bookPeople.length ? `<span class="quiet">Who is coming:</span> ${bookPeople.map((p) => `<label class="tick"><input type="checkbox" name="rider" value="${esc(p.id)}"> ${esc(p.name)}</label>`).join(" ")}` : "";
+    for (const s of main.querySelectorAll(".people-only")) s.hidden = !bookPeople.length;
+  };
+  $("#book [name=phone]")?.addEventListener("change", loadPeople);
+  loadPeople();
   $("#book").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
+    // The people ticked count as men and women too; the number fields are everyone else.
+    const picked = bookPeople.filter((p) => f.getAll("rider").includes(p.id));
     const body = {
-      phone: f.get("phone"), riderName: f.get("riderName"), men: Number(f.get("men")), women: Number(f.get("women")),
+      phone: f.get("phone"), riderName: f.get("riderName"), riders: picked.map((p) => p.id),
+      men: Number(f.get("men")) + picked.filter((p) => p.gender === "m").length,
+      women: Number(f.get("women")) + picked.filter((p) => p.gender === "f").length,
       together: !!f.get("together"),
       pickup: f.get("from") ? { placeId: f.get("from") } : { address: f.get("fromAddress") },
       dropoff: f.get("to") ? { placeId: f.get("to") } : { address: f.get("toAddress") },
@@ -307,8 +323,10 @@ const famText = (h) => [h.name, ...h.passengers.flatMap((p) => [p.name, p.spoken
   ...h.places.flatMap((p) => [p.code, p.name, p.spoken, p.address])].join(" ").toLowerCase();
 
 async function families() {
-  const [fams, prios] = await Promise.all([api("/api/admin/households"), api("/api/admin/priorities")]);
+  const [fams, prios, rel] = await Promise.all([api("/api/admin/households"), api("/api/admin/priorities"), api("/api/admin/relations")]);
   fams.sort((a, b) => a.name.localeCompare(b.name));
+  // Everyone, by family, for the "related to" list.
+  const everyone = `${fams.map((f) => `<optgroup label="${esc(f.name)}">${f.passengers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</optgroup>`).join("")}`;
   main.innerHTML = `
     <div class="card toolbar">
       <input id="fam-q" type="search" placeholder="Search families, people, phones, places…" value="${esc(famState.q)}" autocomplete="off">
@@ -346,6 +364,15 @@ async function families() {
           <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
           <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></details>
+        <h3>Relations and seating</h3>
+        ${relationTable(h, rel)}
+        <details class="add"><summary>+ Add a relation or seat rule</summary>
+        <p class="quiet">"May sit next to each other" lets a man and woman share a row (for example husband and wife, even on separate rides). "Must not sit next to each other" keeps two people in different rows. Callers can also name relatives from other families when they book.</p>
+        <form class="row" data-form="rel"><label>Person <select name="aId" required>${h.passengers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label>
+          <label>Relation <select name="kind">${Object.entries(rel.kinds).map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join("")}</select></label>
+          <label>With <select name="bId" required>${everyone}</select></label>
+          <label>Seating <select name="seating">${Object.entries(rel.seating).map(([v, n]) => `<option value="${v}" ${v === "together" ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+          <label>Note (optional) <input name="note"></label><button>Save</button></form></details>
         <h3>Priority</h3>
         <table><tbody>${hp.map((x) => `<tr data-pri="${esc(x.id)}"><td>${esc(x.passenger_name || "Whole family")}</td>
           <td><span class="prio p${x.level}">${esc(x.label)}</span></td><td>${esc(whenText(x))}</td><td class="quiet">${esc(x.note)}</td>
@@ -390,10 +417,15 @@ async function families() {
     e.preventDefault();
     const hh = e.target.closest("[data-hh]").dataset.hh;
     const f = Object.fromEntries(new FormData(e.target));
-    const path = { ps: "passengers", ph: "phones", pl: "places", pri: "priorities" }[kind];
+    const path = { ps: "passengers", ph: "phones", pl: "places", pri: "priorities", rel: "relations" }[kind];
     if (await act(() => api(`/api/admin/${path}`, { method: "POST", body: { ...f, householdId: hh } }), kind === "pl" ? "Place added" : "Added")) open("families");
   });
   main.addEventListener("change", async (e) => {
+    // Close family usually may sit together: suggest it when the relation is picked.
+    if (e.target.name === "kind" && e.target.closest("[data-form=rel]")) {
+      e.target.form.seating.value = ["spouse", "parent", "sibling", "grandparent"].includes(e.target.value) ? "together" : "normal";
+      return;
+    }
     const a = e.target.dataset.act;
     if (a !== "notify" && a !== "owner") return;
     const number = e.target.closest("[data-ph]").dataset.ph;
@@ -408,7 +440,9 @@ async function families() {
     const ph = e.target.closest("[data-ph]")?.dataset.ph;
     const pl = e.target.closest("[data-pl]")?.dataset.pl;
     const pri = e.target.closest("[data-pri]")?.dataset.pri;
+    const rl = e.target.closest("[data-rel]")?.dataset.rel;
     let done = false;
+    if (a === "remove-rel" && confirm("Remove this relation?")) done = await act(() => api(`/api/admin/relations/${rl}`, { method: "DELETE" }), "Removed");
     if (a === "remove-pri" && confirm("Remove this priority?")) done = await act(() => api(`/api/admin/priorities/${pri}`, { method: "DELETE" }), "Removed");
     if (a === "rename") { const n = prompt("New family name"); if (n) done = await act(() => api(`/api/admin/households/${hh}`, { method: "PATCH", body: { name: n } })); }
     if (a === "remove-fam" && confirm("Remove this family and all its phones?")) done = await act(() => api(`/api/admin/households/${hh}`, { method: "DELETE" }));
@@ -426,6 +460,14 @@ async function families() {
     if (a === "remove-pl" && confirm("Remove this place?")) done = await act(() => api(`/api/admin/places/${pl}`, { method: "DELETE" }));
     if (done) open(current);
   });
+}
+// The relations of a family's people, with their seat rule.
+function relationTable(h, rel) {
+  const mine = new Set(h.passengers.map((p) => p.id));
+  const rows = rel.relations.filter((r) => mine.has(r.a_id) || mine.has(r.b_id));
+  const seat = (r) => (r.seating === "normal" ? `<span class="quiet">${esc(r.seating_label)}</span>` : `<strong>${esc(r.seating_label)}</strong>`);
+  return `<table><tbody>${rows.map((r) => `<tr data-rel="${esc(r.id)}"><td>${esc(r.a_name)} and ${esc(r.b_name)}</td><td>${esc(r.kind_label)}</td><td>${seat(r)}</td><td class="quiet">${esc(r.note)}</td>
+    <td class="actions"><button class="danger" data-act="remove-rel">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>`;
 }
 const placeRow = (p) => `<tr data-pl="${esc(p.id)}"><td>${esc(p.code)}</td><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${esc(p.address)}</td>
   <td class="actions"><button class="ghost" data-act="edit-pl">Edit</button><button class="danger" data-act="remove-pl">Remove</button></td></tr>`;

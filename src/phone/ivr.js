@@ -13,6 +13,7 @@ import { driverAvailable } from "../driver.js";
 import { AREA_KM } from "../travel.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
+import { peopleForFamily } from "../relations.js";
 
 const ACTIVE = ["pending", "proposed", "accepted", "picked_up"];
 const CANCELLABLE = ["pending", "proposed", "accepted"];
@@ -187,6 +188,10 @@ const Q = {
   who: () => [P("P06")],
   men: () => [P("P08")],
   women: () => [P("P09")],
+  with: () => [P("P61")],
+  extra: () => [P("P62")],
+  extra_men: () => [P("P63")],
+  extra_women: () => [P("P64")],
   together: () => [P("P10")],
   from: () => [P("P11")],
   to: () => [P("P12")],
@@ -213,11 +218,71 @@ function whoPick(c) {
   return [P("P07"), list.map((p, i) => [c.name(p), c.say(W.press), numberOf(c, i + 1)])];
 }
 
+// ---------- who is coming ----------
+// After "for myself" or the person picked, the caller adds others from the list (the family and their relatives),
+// one number at a time, then says if anyone not on the list comes too. men and women always count everyone.
+const passenger = (c, id) => c.db.prepare("SELECT * FROM passengers WHERE id = ?").get(id);
+const namedIds = (d) => [d.passengerId, ...(d.with || [])].filter(Boolean);
+function withList(c) {
+  const taken = new Set(namedIds(c.st.draft));
+  return peopleForFamily(c.db, c.phone.household_id).filter((p) => !taken.has(p.id));
+}
+// The list keeps its numbers while people are added, so the caller can go by what they heard.
+function withChoices(c) {
+  c.st.draft.choices ||= withList(c).map((p) => p.id);
+  return c.st.draft.choices;
+}
+const withKeys = (c) => (withChoices(c).length > 9 ? 2 : 1);
+function withSpeech(c) {
+  const taken = new Set(namedIds(c.st.draft));
+  return withChoices(c).map((id, i) => (taken.has(id) ? null : [c.name(passenger(c, id)), c.say(W.press), numberOf(c, i + 1)]));
+}
+function askWith(c) {
+  if (!withList(c).length) return afterWith(c);
+  return ask("with", [P("P60"), withSpeech(c), P("P61")], withKeys(c));
+}
+function afterWith(c) {
+  const d = c.st.draft;
+  if (!namedIds(d).length) return ask("men", Q.men()); // nobody named: just how many men and women
+  return ask("extra", Q.extra());
+}
+function namedCount(c, g) {
+  return namedIds(c.st.draft).map((id) => passenger(c, id)).filter((p) => p?.gender === g).length;
+}
+// Ask whether men and women may sit together only when it matters: someone of each, and not all of them already
+// allowed to by a seat rule.
+function afterPeople(c) {
+  const d = c.st.draft;
+  if (d.men && d.women && !allMayMix(c)) return ask("together", Q.together());
+  return ask("from", Q.from());
+}
+function allMayMix(c) {
+  const d = c.st.draft;
+  if (d.extraMen || d.extraWomen) return false;
+  const ps = namedIds(d).map((id) => passenger(c, id));
+  const ok = c.db.prepare("SELECT 1 FROM relations WHERE seating = 'together' AND ((a_id = ? AND b_id = ?) OR (a_id = ? AND b_id = ?))");
+  for (const m of ps.filter((p) => p.gender === "m")) {
+    for (const w of ps.filter((p) => p.gender === "f")) if (!ok.get(m.id, w.id, w.id, m.id)) return false;
+  }
+  return true;
+}
+function setPeople(c, extraMen, extraWomen) {
+  const d = c.st.draft;
+  d.extraMen = extraMen;
+  d.extraWomen = extraWomen;
+  d.men = namedCount(c, "m") + extraMen;
+  d.women = namedCount(c, "f") + extraWomen;
+}
+
 function readBack(c) {
   const d = c.st.draft;
-  const pass = d.passengerId ? c.db.prepare("SELECT * FROM passengers WHERE id = ?").get(d.passengerId) : null;
+  const named = namedIds(d).map((id) => passenger(c, id)).filter(Boolean);
+  const people = named.length
+    ? [named.map((p, i) => [i && i === named.length - 1 ? c.say(W.and) : null, c.name(p)]),
+      d.extraMen || d.extraWomen ? [c.say(W.and), peopleOf(c, d.extraMen, d.extraWomen)] : null]
+    : peopleOf(c, d.men, d.women);
   return [
-    P("P19"), pass ? c.name(pass) : null, peopleOf(c, d.men, d.women),
+    P("P19"), people,
     c.say(W.from), endPiece(c, d.from, d.fromAddress?.address), c.say(W.to), endPiece(c, d.to, d.toAddress?.address),
     d.pickupMinute != null ? [c.say(W.at), timeOf(c, d.pickupMinute)] : c.say("יעצט"),
     d.returnMinute != null ? [c.say(W.and), c.say(W.back), c.say(W.at), timeOf(c, d.returnMinute)] : null,
@@ -240,7 +305,8 @@ function refusalOf(c, code) {
 async function book(c) {
   const d = c.st.draft;
   const input = {
-    phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", men: d.men, women: d.women, together: !!d.together,
+    phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", riders: namedIds(d), men: d.men, women: d.women,
+    together: !!d.together,
     pickup: d.from ? { placeId: d.from } : d.fromAddress, dropoff: d.to ? { placeId: d.to } : d.toAddress, pickupMinute: d.pickupMinute ?? null, window: d.window,
     returnMinute: d.returnMinute ?? undefined,
   };
@@ -303,7 +369,7 @@ const STEPS = {
   who(c) {
     if (c.keys === "1" || (c.keys === "2" && !members(c).length)) {
       c.st.draft.passengerId = c.phone.passenger_id || null;
-      return ask("men", Q.men());
+      return askWith(c);
     }
     if (c.keys === "2") return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
     return retry(c, "who", Q.who());
@@ -313,7 +379,44 @@ const STEPS = {
     const p = list[Number(c.keys) - 1];
     if (!p) return retry(c, "who_pick", whoPick(c), list.length > 9 ? 2 : 1);
     c.st.draft.passengerId = p.id;
-    return ask("men", Q.men());
+    return askWith(c);
+  },
+  with(c) {
+    const d = c.st.draft;
+    if (!d) return ask("menu", MENU);
+    if (c.keys === "*") return ask("with", [withSpeech(c), P("P61")], withKeys(c));
+    if (/^0+$/.test(c.keys)) {
+      settle(c, "with");
+      return afterWith(c);
+    }
+    const id = withChoices(c)[Number(c.keys) - 1];
+    const p = id && passenger(c, id);
+    if (!p || namedIds(d).includes(id)) return retry(c, "with", Q.with(), withKeys(c));
+    settle(c, "with");
+    d.with = [...(d.with || []), id];
+    if (namedIds(d).length >= 7 || !withList(c).length) return afterWith(c);
+    return ask("with", [c.name(p), c.say(W.added), P("P61")], withKeys(c));
+  },
+  extra(c) {
+    if (c.keys === "1") return ask("extra_men", Q.extra_men());
+    if (c.keys === "2") {
+      setPeople(c, 0, 0);
+      return afterPeople(c);
+    }
+    return retry(c, "extra", Q.extra());
+  },
+  extra_men(c) {
+    const n = Number(c.keys);
+    if (c.keys === "" || !(n >= 0 && n <= 7)) return retry(c, "extra_men", Q.extra_men());
+    c.st.draft.extraMen = n;
+    return ask("extra_women", Q.extra_women());
+  },
+  extra_women(c) {
+    const n = Number(c.keys);
+    if (c.keys === "" || !(n >= 0 && n <= 6)) return retry(c, "extra_women", Q.extra_women());
+    setPeople(c, c.st.draft.extraMen || 0, n);
+    if (c.st.draft.men + c.st.draft.women > 7) return end([P("P23")]);
+    return afterPeople(c);
   },
   men(c) {
     const n = Number(c.keys);

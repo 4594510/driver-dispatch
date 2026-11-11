@@ -208,6 +208,7 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
     picked_up_minute: "INTEGER", // when the driver marked the pickup, minutes after midnight
     eta_dropoff_minute: "INTEGER",
     dropped_off_minute: "INTEGER", // when the driver marked the drop-off
+    riders: "TEXT", // JSON [passenger ids] of the people named on the ride; men and women count them too
   });
   // The driver app (stage 5).
   addColumns(db, "drivers", { pin_hash: "TEXT" }); // the app's sign-in: the driver's phone and a PIN set by an admin
@@ -263,6 +264,18 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1
+    );
+    -- Relations between two people (relations.js), with a seat rule: normal | together (this man and woman may share
+    -- a row) | apart (never in the same row). Either person may be in any family.
+    CREATE TABLE IF NOT EXISTS relations (
+      id TEXT PRIMARY KEY,
+      a_id TEXT NOT NULL REFERENCES passengers(id),
+      b_id TEXT NOT NULL REFERENCES passengers(id),
+      kind TEXT NOT NULL,                        -- spouse | parent | sibling | grandparent | in_law | cousin | other | none
+      seating TEXT NOT NULL DEFAULT 'normal',
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
     -- Comments, complaints, suggestions and requests from the dashboard and the driver app (feedback.js).
     CREATE TABLE IF NOT EXISTS feedback (

@@ -296,3 +296,22 @@ test("a ride booked from the dashboard with a typed one-time address: checked on
     assert.equal(db.prepare("SELECT count(*) AS n FROM places").get().n, 0);
   }, { travel, now: () => new Date("2026-11-11T15:00:00Z") });
 });
+
+test("relations and seat rules are added, listed and removed; a phone's people include relatives", async () => {
+  await withServer(async (call, db) => {
+    await signIn(call);
+    db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'A', 'x'), ('hh2', 'B', 'x')").run();
+    db.prepare("INSERT INTO passengers (id, household_id, name, gender) VALUES ('p1', 'hh1', 'Moshe', 'm'), ('p2', 'hh2', 'Bubby', 'f')").run();
+    db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
+    assert.equal((await call("/api/admin/relations", "POST", { aId: "p1", bId: "p1", kind: "spouse" })).status, 400);
+    const r = await call("/api/admin/relations", "POST", { aId: "p2", bId: "p1", kind: "grandparent", seating: "together" });
+    assert.equal(r.status, 200);
+    const list = (await call("/api/admin/relations")).body;
+    assert.equal(list.relations[0].seating_label, "May sit next to each other");
+    assert.ok(list.kinds.spouse && list.seating.apart);
+    const people = (await call("/api/admin/phones/8455550001/people")).body;
+    assert.deepEqual(people.map((p) => p.name), ["Moshe", "Bubby"]);
+    assert.equal((await call(`/api/admin/relations/${r.body.id}`, "DELETE")).status, 200);
+    assert.equal((await call("/api/admin/relations")).body.relations.length, 0);
+  });
+});
