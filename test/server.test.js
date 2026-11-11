@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createApp, normalizePhone } from "../src/server.js";
 import { openDb } from "../src/db.js";
 
-async function withServer(fn) {
+async function withServer(fn, deps = {}) {
   const db = openDb(":memory:");
-  const app = createApp(db, { ADMIN_EMAIL: "Admin@Example.com", ADMIN_PASSWORD: "first-password-1" });
+  const app = createApp(db, { ADMIN_EMAIL: "Admin@Example.com", ADMIN_PASSWORD: "first-password-1" }, deps);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   let cookie = "";
@@ -100,4 +100,31 @@ test("the dashboard page is served", async () => {
   await withServer(async (call) => {
     assert.equal((await call("/health")).body.ok, true);
   });
+});
+
+test("booking, preview, accept and cancel through the API keep the day's route", async () => {
+  const travel = {
+    geocode: async (a) => ({ "1 example ln": { lat: 41, lng: -74 }, "5 sample rd": { lat: 51, lng: -74 } })[a.toLowerCase()] || null,
+    ensure: async () => {},
+    minutes: (a, b) => ({ minutes: a && b ? Math.abs(Number(a.split(",")[0]) - Number(b.split(",")[0])) : 15, estimated: !(a && b) }),
+  };
+  const now = () => new Date("2026-11-11T15:00:00Z");
+  await withServer(async (call, db) => {
+    await signIn(call);
+    db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
+    db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
+    db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
+    const ride = { phone: "845-555-0001", riderName: "Test", men: 1, women: 0, pickup: { address: "1 Example Ln" }, dropoff: { address: "5 Sample Rd" }, pickupMinute: 720, window: 15 };
+    const made = await call("/api/admin/bookings", "POST", ride);
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    const id = made.body.bookings[0].id;
+    const preview = await call(`/api/admin/bookings/${id}/preview`);
+    assert.equal(preview.body.eta, 720);
+    assert.equal(preview.body.before.stops.length, 0);
+    assert.equal((await call(`/api/admin/bookings/${id}/accept`, "POST", {})).status, 200);
+    const route = (await call("/api/admin/route?day=2026-11-11")).body;
+    assert.deepEqual(route.stops.map((s) => [s.kind, s.arrive]), [["pickup", 720], ["dropoff", 732]]);
+    assert.equal((await call(`/api/admin/bookings/${id}/cancel`, "POST", {})).status, 200);
+    assert.equal((await call("/api/admin/route?day=2026-11-11")).body.stops.length, 0);
+  }, { travel, now });
 });

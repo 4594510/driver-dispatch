@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   reminderMinutesBefore: 5,
   reminderRetries: 2,
   driverWaitMinutes: 5,
+  stopMinutes: 2, // planned time at each stop to get in or out
   serviceAreas: ["Monsey", "Spring Valley"],
 };
 

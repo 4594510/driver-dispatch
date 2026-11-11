@@ -9,6 +9,7 @@ const EDITABLE = {
   maxTripMinutes: (v) => Number.isInteger(v) && v >= 5 && v <= 120,
   serviceAreas: (v) => Array.isArray(v) && v.length > 0 && v.every((a) => typeof a === "string" && a.trim()),
   driverWaitMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 30,
+  stopMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 10,
 };
 
 export function getSettings(db) {

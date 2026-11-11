@@ -6,7 +6,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { openDb, newId, nowIso, audit } from "./db.js";
-import { requestRide, acceptBooking, changeStatus, proposeTime, getBooking } from "./bookings.js";
+import { changeStatus, proposeTime, getBooking } from "./bookings.js";
+import { bookRide, previewAccept, acceptRide, refreshDay, dayRoute } from "./dispatch.js";
+import { createTravel } from "./travel.js";
 import * as auth from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { report } from "./reports.js";
@@ -26,8 +28,11 @@ export function normalizePhone(s) {
   return null;
 }
 
-export function createApp(db = openDb(), env = process.env) {
+// deps.travel replaces Google Maps and deps.now the clock (tests).
+export function createApp(db = openDb(), env = process.env, deps = {}) {
   auth.initAuth(db);
+  const clock = deps.now || (() => new Date());
+  const travel = deps.travel || createTravel(db, { apiKey: env.GOOGLE_MAPS_API_KEY, traffic: env.ROUTES_TRAFFIC !== "off", timeZone: getSettings(db).timeZone });
   auth.ensureFirstAdmin(db, env);
   const recordingsDir = env.RECORDINGS_DIR || path.join(path.dirname(env.DB_FILE || "data/dispatch.db"), "recordings");
 
@@ -246,38 +251,60 @@ export function createApp(db = openDb(), env = process.env) {
 
   // --- bookings ---
   admin.get("/bookings", (req, res) => {
-    const day = req.query.day || localParts(new Date(), getSettings(db).timeZone).day;
+    const day = req.query.day || localParts(clock(), getSettings(db).timeZone).day;
     const status = req.query.status;
     const rows = status
       ? db.prepare("SELECT * FROM bookings WHERE status = ? ORDER BY day DESC, pickup_minute LIMIT 500").all(status)
       : db.prepare("SELECT * FROM bookings WHERE day = ? ORDER BY pickup_minute").all(day);
     res.json(rows);
   });
-  admin.post("/bookings", (req, res) => {
-    const r = requestRide(db, { ...req.body, phone: normalizePhone(req.body.phone) }, new Date(), getSettings(db));
-    if (r.ok) for (const b of r.bookings) audit(db, req.actor, "booked_for_caller", b.id);
+  admin.post("/bookings", async (req, res) => {
+    const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db), req.actor);
     res.status(r.ok ? 200 : 400).json(r);
   });
-  admin.patch("/bookings/:id", (req, res) => {
+  admin.get("/route", (req, res) => {
+    const day = req.query.day || localParts(clock(), getSettings(db).timeZone).day;
+    res.json(dayRoute(db, day));
+  });
+  admin.post("/route/refresh", async (req, res) => {
+    const day = req.body.day || localParts(clock(), getSettings(db).timeZone).day;
+    const r = await refreshDay(db, travel, day, getSettings(db), clock());
+    res.json({ ...r, route: dayRoute(db, day) });
+  });
+  admin.get("/bookings/:id/preview", async (req, res) => {
+    const r = await previewAccept(db, travel, req.params.id, getSettings(db), clock());
+    res.status(r.ok ? 200 : 400).json(r);
+  });
+  admin.patch("/bookings/:id", async (req, res) => {
     const b = getBooking(db, req.params.id);
     if (!b) return res.status(404).json({ error: "not_found" });
     if (!["pending", "proposed", "accepted"].includes(b.status)) return bad(res, "This ride can no longer be changed.");
     const pickup = String(req.body.pickup_address ?? b.pickup_address).trim();
     const dropoff = String(req.body.dropoff_address ?? b.dropoff_address).trim();
     if (!pickup || !dropoff) return bad(res, "Pickup and destination are needed.");
-    db.prepare("UPDATE bookings SET pickup_address = ?, dropoff_address = ?, updated_at = ? WHERE id = ?").run(pickup, dropoff, nowIso(), b.id);
+    // A changed address needs a new map point (found again on the refresh).
+    db.prepare(`UPDATE bookings SET pickup_address = ?, dropoff_address = ?, updated_at = ?,
+      pickup_lat = CASE WHEN pickup_address = ? THEN pickup_lat END, pickup_lng = CASE WHEN pickup_address = ? THEN pickup_lng END,
+      dropoff_lat = CASE WHEN dropoff_address = ? THEN dropoff_lat END, dropoff_lng = CASE WHEN dropoff_address = ? THEN dropoff_lng END
+      WHERE id = ?`).run(pickup, dropoff, nowIso(), pickup, pickup, dropoff, dropoff, b.id);
     audit(db, req.actor, "booking_changed", b.id, { pickup_address: pickup, dropoff_address: dropoff });
-    res.json({ ok: true, booking: getBooking(db, b.id) });
+    const r = b.status === "accepted" ? await refreshDay(db, travel, b.day, getSettings(db), clock()) : null;
+    const late = r?.route && (r.route.late[b.id] || Object.keys(r.route.late).length || Object.keys(r.route.over).length);
+    res.json({ ok: true, booking: getBooking(db, b.id), warning: late ? "With the new address some pickups can't be on time. Check today's route." : null });
   });
-  admin.post("/bookings/:id/:action", (req, res) => {
+  admin.post("/bookings/:id/:action", async (req, res) => {
     const { id, action } = req.params;
     const driverId = req.body.driverId || db.prepare("SELECT id FROM drivers ORDER BY rowid LIMIT 1").get()?.id;
     if (["accept", "propose"].includes(action) && !driverId) return bad(res, "Add a driver first.");
     let r;
-    if (action === "accept") r = acceptBooking(db, id, driverId, getSettings(db));
+    const settings = getSettings(db);
+    if (action === "accept") r = await acceptRide(db, travel, id, driverId, settings, clock());
     else if (action === "propose") r = proposeTime(db, id, req.body.minute, driverId);
-    else if (["reject", "cancel", "pickup", "done", "no_show"].includes(action)) r = changeStatus(db, id, action, req.actor);
-    else return res.status(404).json({ error: "unknown_action" });
+    else if (["reject", "cancel", "pickup", "done", "no_show"].includes(action)) {
+      const was = getBooking(db, id);
+      r = changeStatus(db, id, action, req.actor, clock(), settings);
+      if (r.ok && ["accepted", "picked_up"].includes(was.status)) await refreshDay(db, travel, was.day, settings, clock());
+    } else return res.status(404).json({ error: "unknown_action" });
     res.status(r.ok ? 200 : 400).json(r);
   });
   admin.get("/bookings/:id", (req, res) => {
@@ -292,7 +319,7 @@ export function createApp(db = openDb(), env = process.env) {
     r.ok ? res.json(r) : bad(res, r.error);
   });
   admin.get("/reports", (req, res) => {
-    const today = localParts(new Date(), getSettings(db).timeZone).day;
+    const today = localParts(clock(), getSettings(db).timeZone).day;
     res.json(report(db, req.query.from || today, req.query.to || today));
   });
   admin.get("/audit", (_req, res) => res.json(db.prepare("SELECT * FROM audit ORDER BY id DESC LIMIT 500").all()));

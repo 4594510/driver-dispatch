@@ -12,7 +12,11 @@ async function api(path, opts = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/api/login") { showLogin(); throw new Error("signed out"); }
-  if (!res.ok) throw new Error(data.error || (data.errors || []).map(errorText).join(", ") || `Error ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || (data.errors || []).map(errorText).join(", ") || `Error ${res.status}`);
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -22,6 +26,7 @@ const ERRORS = {
   no_riders: "Enter how many men and women", no_pickup: "Choose a pickup place", no_dropoff: "Choose a destination",
   return_before_pickup: "The return must be after the pickup", return_outside_hours: "The return is outside service hours",
   wrong_status: "Not possible in this ride's status", not_pending: "This ride isn't waiting for an answer",
+  no_time: "The route can't reach it in time without making others late", too_far: "Longer than the trip limit",
 };
 const errorText = (c) => ERRORS[c] || c;
 
@@ -44,7 +49,7 @@ const minuteText = (m) => {
 const timeToMinute = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
 const minuteToTime = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const STATUS = { pending: "Waiting for driver", proposed: "New time offered", accepted: "Accepted", picked_up: "On board", completed: "Completed", rejected: "Rejected", cancelled: "Cancelled", no_show: "No-show" };
-const riders = (b) => [b.men && `${b.men} men`, b.women && `${b.women} women`].filter(Boolean).join(", ") + (b.together ? " (may sit together)" : "");
+const riders = (b) => [b.men && `${b.men} ${b.men === 1 ? "man" : "men"}`, b.women && `${b.women} ${b.women === 1 ? "woman" : "women"}`].filter(Boolean).join(", ") + (b.together ? " (may sit together)" : "");
 
 // ---------- login ----------
 function showLogin() { $("#app").hidden = true; $("#login").hidden = false; }
@@ -124,10 +129,24 @@ function wireBookings(el, reload) {
       if (pickup == null) return;
       const dropoff = prompt("Destination", b.dropoff_address);
       if (dropoff == null) return;
-      if (await act(() => api(`/api/admin/bookings/${id}`, { method: "PATCH", body: { pickup_address: pickup, dropoff_address: dropoff } }), "Changed")) reload();
+      if (await act(async () => {
+        const r = await api(`/api/admin/bookings/${id}`, { method: "PATCH", body: { pickup_address: pickup, dropoff_address: dropoff } });
+        if (r.warning) alert(r.warning);
+      }, "Changed")) reload();
       return;
     }
     let body = {};
+    if (a === "accept") {
+      let p;
+      try { p = await api(`/api/admin/bookings/${id}/preview`); } catch (err) { toast(err.message); return; }
+      const names = Object.fromEntries((await api("/api/admin/bookings")).map((b) => [b.id, b.rider_name || b.booked_by_phone]));
+      const moves = Object.entries(p.shifts).flatMap(([bid, k]) => Object.entries(k).map(([kind, [from, to]]) =>
+        `  ${names[bid] || "a rider"}: ${kind === "pickup" ? "pickup" : "drop-off"} ${minuteText(from)} → ${minuteText(to)}`));
+      const text = `Pickup about ${minuteText(p.eta)}.\nDriving today: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes.` +
+        (moves.length ? `\nTimes that move:\n${moves.join("\n")}` : "\nNobody else's time moves.") +
+        (p.after.estimated ? "\n(Some drive times are estimates.)" : "") + "\n\nAccept this ride?";
+      if (!confirm(text)) return;
+    }
     if (a === "propose") {
       const t = prompt("New pickup time (for example 14:30)");
       if (!t) return;
@@ -139,10 +158,11 @@ function wireBookings(el, reload) {
 }
 
 async function today() {
-  const [rows, fams] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/households")]);
+  const [rows, fams, route] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/households"), api("/api/admin/route")]);
   const phones = fams.flatMap((h) => h.phones.map((p) => ({ ...p, family: h.name, places: h.places })));
   const shared = await api("/api/admin/places");
   main.innerHTML = `
+    <div class="card"><h2>Today's route <button id="recalc" class="ghost">Recalculate</button></h2>${routeCard(route)}</div>
     <div class="card"><h2>Today's rides</h2><div id="list">${bookingTable(rows)}</div></div>
     <div class="card"><h2>Book a ride for a caller</h2>
       <form id="book">
@@ -178,8 +198,33 @@ async function today() {
       pickupMinute: f.get("time") ? timeToMinute(f.get("time")) : null, window: Number(f.get("window")),
       returnMinute: f.get("ret") ? timeToMinute(f.get("ret")) : undefined,
     };
-    if (await act(() => api("/api/admin/bookings", { method: "POST", body }), "Ride requested; it waits for the driver")) reload();
+    try {
+      const r = await api("/api/admin/bookings", { method: "POST", body });
+      toast(`Ride requested (pickup about ${minuteText(r.etas[r.bookings[0].id])}); it waits for the driver`);
+      reload();
+    } catch (err) {
+      if (err.message === "signed out") return;
+      const sug = err.data?.suggestions || [];
+      toast(err.message + (sug.length ? `. Times that fit: ${sug.map(minuteText).join(", ")}` : ""));
+    }
   });
+  $("#recalc").addEventListener("click", async () => { if (await act(() => api("/api/admin/route/refresh", { method: "POST", body: {} }), "Route recalculated")) reload(); });
+}
+
+function routeCard(r) {
+  if (!r.stops.length) return '<p class="quiet">No accepted rides yet.</p>';
+  const seatText = (seats) => Object.entries(seats || {}).map(([row, x]) => `${{ front: "front", row2: "row 2", row3: "row 3" }[row] || row}: ${[x.men && `${x.men}m`, x.women && `${x.women}w`].filter(Boolean).join(" ")}`).join(", ");
+  const freeAfter = (i) => {
+    const s = r.seatsByStop[i];
+    return s ? s.rows.map((x) => `${{ front: "F", row2: "2", row3: "3" }[x.row] || x.row}:${x.free}`).join(" ") : "";
+  };
+  return `<p class="quiet">${r.stops.length} stops, about ${r.driveMinutes} minutes of driving${r.estimated ? " (some drive times are estimates)" : ""}.</p>
+    <div class="wrap"><table><thead><tr><th>Time</th><th>Stop</th><th>Who</th><th>Address</th><th>Seats</th><th>Free after (front, 2, 3)</th></tr></thead><tbody>${r.stops.map((s, i) => {
+      const late = s.window && s.arrive > s.window[1];
+      return `<tr><td>${minuteText(s.arrive)}${s.window ? `<div class="quiet${late ? " error" : ""}">window ${minuteText(s.window[0])}–${minuteText(s.window[1])}${late ? ", late" : ""}</div>` : ""}</td>
+        <td>${s.kind === "pickup" ? "Pick up" : "Drop off"}</td><td>${esc(s.rider_name || "")}<div class="quiet">${esc(riders(s))}</div></td>
+        <td>${esc(s.address)}</td><td>${esc(seatText(s.seats))}</td><td class="quiet">${esc(freeAfter(i))}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
 }
 const placeOptions = (places) => places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} ${esc(p.name)}${p.household_id ? "" : " (shared)"}</option>`).join("");
 
@@ -343,7 +388,8 @@ async function settings() {
     <div class="card"><h2>Service</h2><form id="svc">
       <div class="row"><label>Opens <input type="time" name="open" value="${minuteToTime(s.openMinute)}"></label>
         <label>Closes <input type="time" name="close" value="${minuteToTime(s.closeMinute)}"></label>
-        <label>Longest drive per trip (minutes) <input type="number" name="max" min="5" max="120" value="${s.maxTripMinutes}"></label></div>
+        <label>Longest drive per trip (minutes) <input type="number" name="max" min="5" max="120" value="${s.maxTripMinutes}"></label>
+        <label>Minutes at each stop <input type="number" name="stop" min="0" max="10" value="${s.stopMinutes}"></label></div>
       <label>Service areas (one per line) <textarea name="areas" rows="3">${esc(s.serviceAreas.join("\n"))}</textarea></label>
       <button>Save</button></form></div>
     <div class="card"><h2>Drivers</h2><table><tbody>${drivers.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(d.phone)}</td><td>${esc(d.status)}</td></tr>`).join("") || '<tr><td class="quiet">No driver yet.</td></tr>'}</tbody></table>
@@ -356,7 +402,7 @@ async function settings() {
     e.preventDefault();
     const f = new FormData(e.target);
     act(() => api("/api/admin/settings", { method: "PUT", body: {
-      openMinute: timeToMinute(f.get("open")), closeMinute: timeToMinute(f.get("close")), maxTripMinutes: Number(f.get("max")),
+      openMinute: timeToMinute(f.get("open")), closeMinute: timeToMinute(f.get("close")), maxTripMinutes: Number(f.get("max")), stopMinutes: Number(f.get("stop")),
       serviceAreas: f.get("areas").split("\n").map((x) => x.trim()).filter(Boolean),
     } }), "Saved");
   });
