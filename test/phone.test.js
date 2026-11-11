@@ -103,7 +103,7 @@ test("men and women together are asked about; a full van offers the next time", 
 
 test("wrong keys are asked again, and twice wrong says goodbye", async () => {
   const db = setup();
-  const r = await call(db, ["7", "", "5"]);
+  const r = await call(db, ["7", "", "8"]);
   assert.deepEqual(prompts(r[1]), ["P42", "P04"]);
   assert.deepEqual(prompts(r[2]), ["P43", "P04"]);
   assert.deepEqual(prompts(r[3]), ["P41"]);
@@ -252,4 +252,29 @@ test("a caller is known by a family's phone or one person's phone; 'for myself' 
     { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1" },
     { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null },
   ]);
+});
+
+test("menu key 5 plays the messages sent out to everyone or the caller's family, newest first", async () => {
+  const db = setup();
+  db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
+  const add = db.prepare("INSERT INTO announcements (id, text, recording, audience, created_by, created_at) VALUES (?, ?, ?, ?, 'admin', ?)");
+  add.run("a1", "Old news", null, "all", "2026-10-01T15:00:00Z"); // over two weeks ago: not played
+  add.run("a2", "No rides Friday", null, "all", "2026-11-09T16:00:00Z"); // Monday
+  add.run("a3", "Other family", null, "hh2", "2026-11-10T16:00:00Z");
+  add.run("a4", "", "msg.wav", "hh1", "2026-11-10T17:00:00Z"); // yesterday, recorded
+  const r = await call(db, ["5"]);
+  assert.deepEqual(prompts(r[1]), ["P55", "P55", "P04"]);
+  assert.ok(r[1].play.some((p) => p.audio === "https://dispatch.example/audio/msg.wav"), "a recording plays as recorded");
+  const text = said(r[1]);
+  assert.ok(text.includes("No rides Friday"), "a text message is read out");
+  assert.ok(!text.includes("Other family") && !text.includes("Old news"));
+  assert.ok(text.includes("נעכטן") && text.includes("מאנטאג"), "each says which day it was sent");
+  assert.ok(r[1].play.findIndex((p) => p.audio) < r[1].play.findIndex((p) => p.say === "No rides Friday"), "newest first");
+  assert.ok(r[1].gather, "back to the menu");
+});
+
+test("menu key 5 with no messages says so", async () => {
+  const db = setup();
+  const r = await call(db, ["5"]);
+  assert.deepEqual(prompts(r[1]), ["P54", "P04"]);
 });

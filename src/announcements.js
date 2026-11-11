@@ -32,3 +32,14 @@ export function listAnnouncements(db) {
       FROM announcements a ORDER BY a.created_at DESC LIMIT 100`)
     .all();
 }
+
+// What a caller can hear again on the phone (menu key 5): the messages sent to everyone or to their family in the last
+// `days` days, newest first.
+export const HEAR_DAYS = 14;
+export const HEAR_MAX = 5;
+export function recentAnnouncements(db, householdId, now = new Date(), { days = HEAR_DAYS, limit = HEAR_MAX } = {}) {
+  const since = new Date(now.getTime() - days * 864e5).toISOString();
+  return db
+    .prepare("SELECT * FROM announcements WHERE (audience = 'all' OR audience = ?) AND created_at >= ? ORDER BY created_at DESC LIMIT ?")
+    .all(householdId, since, limit);
+}
