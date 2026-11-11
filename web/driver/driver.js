@@ -324,6 +324,7 @@ function dayView() {
 function moreView() {
   return `<div class="card"><h2>${esc(today.driver.name)}</h2><p class="quiet">${esc(today.driver.phone)}</p>
     <button class="ghost big" data-late>Running late…</button>
+    <button class="ghost big" data-feedback>Comment, complaint or request…</button>
     <button class="ghost big" data-refresh>Load again</button>
     <button class="bad big" data-signout>Sign out</button></div>
     <p class="quiet">Updated ${lastOk ? new Date(lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never"}.</p>`;
@@ -385,6 +386,19 @@ function pauseSheet() {
     <button class="ghost big" data-close>Cancel</button>`);
 }
 
+// Comments, complaints, suggestions and requests, with the answers to earlier ones.
+const FB_STATUS = { new: "Sent", working: "Being worked on", needs_you: "Waiting on the office", done: "Done", declined: "Not done" };
+async function feedbackSheet() {
+  let past = [];
+  try { const r = await api("/api/driver/feedback"); if (r.ok) past = r.data; } catch { /* no signal: the form still works */ }
+  sheet(`<h2>Comment, complaint or request</h2>
+    <label>What kind <select id="fb-kind"><option value="request">Request</option><option value="suggestion">Suggestion</option><option value="complaint">Complaint</option><option value="comment">Comment</option></select></label>
+    <label>Write it here <textarea id="fb-text" rows="5"></textarea></label>
+    <button class="good big" data-feedback-send>Send</button>
+    <button class="ghost big" data-close>Close</button>
+    ${past.length ? `<h3>Sent before</h3>${past.map((f) => `<div class="card"><p>${esc(f.text)}</p><p class="quiet">${esc(new Date(f.created_at).toLocaleDateString())} · ${esc(FB_STATUS[f.status] || f.status)}</p>${f.reply ? `<p class="quiet">Answer: ${esc(f.reply)}</p>` : ""}</div>`).join("")}` : ""}`);
+}
+
 // Local change right away, so the driver can go on without signal.
 function markLocal(id, status) {
   if (!today) return;
@@ -421,6 +435,14 @@ document.addEventListener("click", async (e) => {
   if (ds.propose) return proposeSheet(ds.propose);
   if (ds.proposeAt) { closeSheet(); await act(`/api/driver/bookings/${ds.id}/propose`, { minute: Number(ds.proposeAt) }, { queueable: false, ok: "Sent to the caller" }); return; }
   if (ds.late != null) return lateSheet();
+  if (ds.feedback != null) return feedbackSheet();
+  if (ds.feedbackSend != null) {
+    const text = $("#fb-text").value.trim();
+    if (!text) { toast("Write something first."); return; }
+    closeSheet();
+    await act("/api/driver/feedback", { kind: $("#fb-kind").value, text }, { ok: "Sent. Thank you" });
+    return;
+  }
   if (ds.lateBy) { closeSheet(); await act("/api/driver/late", { minutes: Number(ds.lateBy) }, { ok: "Riders told" }); return; }
   if (ds.reorder != null) { reorder = today.route.stops.filter((s) => ["accepted", "picked_up"].includes(s.status) && !(s.kind === "pickup" && s.status === "picked_up")).map((s) => ({ ...s })); render(); return; }
   if (ds.reorderCancel != null) { reorder = null; render(); return; }

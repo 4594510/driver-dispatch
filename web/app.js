@@ -74,7 +74,7 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#logout").addEventListener("click", async () => { await api("/api/logout", { method: "POST", body: {} }); showLogin(); });
 
 // ---------- tabs ----------
-const TABS = { today, pending, families, places, announce, reports, settings, activity };
+const TABS = { today, pending, families, places, announce, reports, settings, activity, feedback };
 let current = "today";
 $("#tabs").addEventListener("click", (e) => { const t = e.target.dataset.tab; if (t) open(t); });
 function open(tab) {
@@ -410,6 +410,40 @@ async function announce() {
       toast(`Queued for ${r.phones} phones`);
       open("announce");
     });
+  });
+}
+
+// ---------- feedback ----------
+// Comments, complaints, suggestions and requests. Claude checks new ones regularly, does what is asked, and writes
+// back here what it did or what it needs from you.
+const FB_STATUS = { new: "New", working: "Claude is on it", needs_you: "Needs you", done: "Done", declined: "Not done" };
+const FB_CLASS = { new: "pending", working: "accepted", needs_you: "proposed", done: "completed", declined: "rejected" };
+async function feedback() {
+  const list = await api("/api/admin/feedback");
+  main.innerHTML = `
+    <div class="card"><h2>Comments, complaints, suggestions, requests</h2>
+      <form id="fb">
+        <label>What kind <select name="kind"><option value="request">Request</option><option value="suggestion">Suggestion</option><option value="complaint">Complaint</option><option value="comment">Comment</option></select></label>
+        <label>Write it here <textarea name="text" rows="4" required></textarea></label>
+        <button>Send</button>
+        <p class="quiet">Claude reads these regularly, does what is asked, and writes back below. If something is needed from you, it shows "Needs you".</p>
+      </form></div>
+    <div class="card"><h2>Sent</h2>${list.length ? `<div class="wrap"><table><thead><tr><th>When</th><th>From</th><th>What</th><th>Status</th><th></th></tr></thead><tbody>${list.map((f) => `
+      <tr data-fb="${esc(f.id)}"><td>${esc(new Date(f.created_at).toLocaleString())}</td><td>${f.source === "driver" ? "Driver" : esc(f.author)}</td>
+      <td><b>${esc(f.kind[0].toUpperCase() + f.kind.slice(1))}:</b> ${esc(f.text).replace(/\n/g, "<br>")}${f.reply ? `<div class="quiet">Answer: ${esc(f.reply).replace(/\n/g, "<br>")}</div>` : ""}</td>
+      <td><span class="status ${FB_CLASS[f.status] || ""}">${esc(FB_STATUS[f.status] || f.status)}</span></td>
+      <td class="actions">${["done", "declined"].includes(f.status) ? '<button class="ghost" data-act="fb-reopen">Reopen</button>' : '<button class="ghost" data-act="fb-close">Close</button>'}</td></tr>`).join("")}</tbody></table></div>` : '<p class="quiet">Nothing yet.</p>'}</div>`;
+  $("#fb").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    if (await act(() => api("/api/admin/feedback", { method: "POST", body: { kind: f.get("kind"), text: f.get("text") } }), "Sent. Claude will look at it.")) open("feedback");
+  });
+  main.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    const id = b?.closest("[data-fb]")?.dataset.fb;
+    if (!id) return;
+    const status = b.dataset.act === "fb-close" ? "done" : "new";
+    if (await act(() => api(`/api/admin/feedback/${id}`, { method: "PATCH", body: { status } }), status === "done" ? "Closed" : "Reopened")) open("feedback");
   });
 }
 
