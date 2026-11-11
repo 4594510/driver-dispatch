@@ -5,7 +5,7 @@ import { openDb } from "../src/db.js";
 
 async function withServer(fn, deps = {}) {
   const db = openDb(":memory:");
-  const app = createApp(db, { ADMIN_EMAIL: "Admin@Example.com", ADMIN_PASSWORD: "first-password-1" }, deps);
+  const app = createApp(db, { ADMIN_EMAIL: "Admin@Example.com", ADMIN_PASSWORD: "first-password-1", FONORY_WEBHOOK_KEY: "hook-secret", PUBLIC_URL: "https://dispatch.example" }, deps);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   let cookie = "";
@@ -89,7 +89,8 @@ test("an announcement queues a delivery per phone by its setting", async () => {
     await call("/api/admin/phones", "POST", { number: "8455550002", householdId: hh, notify: "voice" });
     await call("/api/admin/phones", "POST", { number: "8455550003", householdId: hh, notify: "both" });
     const noRec = (await call("/api/admin/announcements", "POST", { text: "No service Friday" })).body;
-    assert.equal(noRec.voiceSkipped, 1);
+    // Without a recording the call reads the text in the Yiddish voice.
+    assert.equal(db.prepare("SELECT count(*) AS n FROM deliveries WHERE announcement_id = ? AND channel = 'voice'").get(noRec.id).n, 2);
     const withRec = (await call("/api/admin/announcements", "POST", { text: "No service Friday", recording: "x.mp3" })).body;
     const rows = db.prepare("SELECT phone, channel FROM deliveries WHERE announcement_id = ? ORDER BY phone, channel").all(withRec.id);
     assert.deepEqual(rows.map((r) => `${r.phone.slice(-1)}${r.channel[0]}`), ["1t", "2v", "3t", "3v"]);
@@ -127,4 +128,21 @@ test("booking, preview, accept and cancel through the API keep the day's route",
     assert.equal((await call(`/api/admin/bookings/${id}/cancel`, "POST", {})).status, 200);
     assert.equal((await call("/api/admin/route?day=2026-11-11")).body.stops.length, 0);
   }, { travel, now });
+});
+
+test("the phone line needs Fonory's secret key, then answers each step", async () => {
+  await withServer(async (call, db) => {
+    db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
+    db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
+    const step = { call_id: "c1", from: "+18455550001", direction: "inbound", step: "start", keys: "" };
+    assert.equal((await call("/fonory/step", "POST", step)).status, 403);
+    assert.equal((await call("/fonory/step?key=wrong", "POST", step)).status, 403);
+    const r = await call("/fonory/step?key=hook-secret", "POST", step);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.play, [{ prompt: "P01" }, { prompt: "P04" }]);
+    assert.deepEqual(r.body.gather, { step: "menu", max_keys: 1, timeout_s: 6 });
+    const status = await call("/fonory/status?key=hook-secret", "POST", { call_id: "c1", result: "completed" });
+    assert.equal(status.status, 200);
+    assert.equal((await call("/audio/../data.db")).status, 404);
+  });
 });

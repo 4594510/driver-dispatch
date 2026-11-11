@@ -1,6 +1,6 @@
 // Announcements: one message from the admin to everyone (or one household), delivered to each approved phone the way
-// that phone is set: a text, a voice call playing the admin's recording, or both. Deliveries are queued here; the Fonory
-// connection (stage 4) sends them and records whether each one went through.
+// that phone is set: a text, a voice call, or both. The call plays the admin's recording when there is one, otherwise
+// the text in the Yiddish voice. Deliveries are queued here; notify.js sends them through Fonory.
 import { audit, newId, nowIso } from "./db.js";
 
 export function createAnnouncement(db, { text, recording = null, audience = "all" }, by) {
@@ -15,17 +15,12 @@ export function createAnnouncement(db, { text, recording = null, audience = "all
   db.prepare("INSERT INTO announcements (id, text, recording, audience, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     id, String(text).trim(), recording, audience, by, at);
   const add = db.prepare("INSERT INTO deliveries (announcement_id, phone, channel, kind, updated_at) VALUES (?, ?, ?, 'announcement', ?)");
-  let voiceSkipped = 0;
   for (const p of phones) {
     if (p.notify !== "voice") add.run(id, p.number, "text", at);
-    if (p.notify !== "text") {
-      // A voice call needs the recording; without one, a voice-only phone gets nothing and the admin is told.
-      if (recording) add.run(id, p.number, "voice", at);
-      else if (p.notify === "voice") voiceSkipped++;
-    }
+    if (p.notify !== "text") add.run(id, p.number, "voice", at);
   }
   audit(db, by, "announcement_created", null, { id, audience, phones: phones.length });
-  return { ok: true, id, phones: phones.length, voiceSkipped };
+  return { ok: true, id, phones: phones.length, voiceSkipped: 0 };
 }
 
 export function listAnnouncements(db) {
