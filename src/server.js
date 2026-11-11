@@ -66,7 +66,11 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   const notify = (b, kind, payload) => notifyBooking(db, b, kind, payload);
   const fonory = express.Router();
   fonory.use(express.urlencoded({ extended: false }));
-  fonory.use((req, res, next) => (webhookAllowed(req, env) ? next() : res.status(403).json({ error: "forbidden" })));
+  fonory.use((req, res, next) => {
+    if (webhookAllowed(req, env)) return next();
+    console.log(`phone line: refused ${req.method} ${req.path} from ${req.ip}`);
+    res.status(403).json({ error: "forbidden" });
+  });
   fonory.post("/step", async (req, res) => {
     try {
       res.json(await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base: baseUrl(req), notify }, req.body || {}));
