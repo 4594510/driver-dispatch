@@ -135,6 +135,13 @@ test("the pickup place can be changed by phone only more than 30 minutes ahead",
   assert.deepEqual(prompts(late[2]), ["P36", "P41"]);
 });
 
+test("a place with a 3-digit code is picked by phone", async () => {
+  const db = setup();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('store', NULL, '123', 'Store', '3 Other St', 46, -74)").run();
+  await call(db, ["1", "1", "0", "2", "1", "2", "123", "2", "1200", "1", "2", "1"], { id: "a" });
+  assert.equal(db.prepare("SELECT dropoff_place_id FROM bookings").get().dropoff_place_id, "store");
+});
+
 test("messages: queued by the phone's setting, sent through Fonory, retried when unanswered", async () => {
   const db = setup();
   await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1015", "1", "2", "1"], { id: "a" });

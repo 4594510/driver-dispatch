@@ -6,7 +6,7 @@
 import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
-import { keypadTime, localParts, canChangePickup } from "../rules.js";
+import { keypadTime, localParts, canChangePickup, normalCode } from "../rules.js";
 import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
@@ -170,12 +170,12 @@ function rideItems(c, b, i) {
 }
 function placesFor(c) {
   return c.db
-    .prepare("SELECT * FROM places WHERE active = 1 AND (household_id IS NULL OR household_id = ?) ORDER BY code")
+    .prepare("SELECT * FROM places WHERE active = 1 AND (household_id IS NULL OR household_id = ?) ORDER BY length(code), code")
     .all(c.phone.household_id);
 }
 function homeOf(c) {
   return c.db
-    .prepare("SELECT * FROM places WHERE active = 1 AND household_id = ? ORDER BY kind != 'home', code LIMIT 1")
+    .prepare("SELECT * FROM places WHERE active = 1 AND household_id = ? ORDER BY kind != 'home', length(code), code LIMIT 1")
     .get(c.phone.household_id);
 }
 function placeList(c) {
@@ -515,7 +515,7 @@ const STEPS = {
   },
   async change_code(c) {
     if (c.keys === "0") return ask("change_code", [placeList(c), P("P13")], 3);
-    const place = placesFor(c).find((p) => p.code === c.keys.padStart(2, "0"));
+    const place = placesFor(c).find((p) => p.code === normalCode(c.keys));
     const b = getBooking(c.db, c.st.changing);
     if (!place) return retry(c, "change_code", Q.change_code(), 3);
     if (!b || !CANCELLABLE.includes(b.status) || !canChangePickup(today(c).minute, b.pickup_minute, c.settings)) return end([P("P36")]);
@@ -581,7 +581,7 @@ function confirmAddress(c, which, next) {
 }
 function placeCode(c, which, next) {
   if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], 3);
-  const place = placesFor(c).find((p) => p.code === c.keys.padStart(2, "0"));
+  const place = placesFor(c).find((p) => p.code === normalCode(c.keys));
   if (!place) return retry(c, `${which}_code`, Q[`${which}_code`](), 3);
   return setPlace(c, which, place, next);
 }

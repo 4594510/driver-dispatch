@@ -20,7 +20,7 @@ import { getSettings, updateSettings } from "./settings.js";
 import { scheduleView, addChange, removeChange } from "./schedule.js";
 import { report } from "./reports.js";
 import { createAnnouncement, listAnnouncements } from "./announcements.js";
-import { localParts } from "./rules.js";
+import { localParts, normalCode } from "./rules.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { driverRouter, setPin, driverNow } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
@@ -169,7 +169,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const households = db.prepare("SELECT * FROM households WHERE active = 1 ORDER BY name").all();
     const passengers = db.prepare("SELECT * FROM passengers WHERE active = 1 ORDER BY name").all();
     const phones = db.prepare("SELECT * FROM phones WHERE active = 1").all();
-    const places = db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY code").all();
+    const places = db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY length(code), code").all();
     res.json(households.map((h) => ({
       ...h,
       passengers: passengers.filter((p) => p.household_id === h.id),
@@ -298,13 +298,13 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     res.json(peopleForFamily(db, phone.household_id).map((p) => ({ id: p.id, name: p.name, gender: p.gender, household_id: p.household_id })));
   });
 
-  // --- places (saved addresses, picked by a 2-digit code on the phone) ---
-  admin.get("/places", (_req, res) => res.json(db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY household_id IS NOT NULL, code").all()));
+  // --- places (saved addresses, picked by a 1-3 digit code on the phone) ---
+  admin.get("/places", (_req, res) => res.json(db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY household_id IS NOT NULL, length(code), code").all()));
   // Codes a family sees: its own and the shared ones (a shared place sees every code).
   const usedCodes = (householdId, exceptId = null) => new Map(db
     .prepare("SELECT code, name FROM places WHERE active = 1 AND id IS NOT ? AND (household_id IS NULL OR ? IS NULL OR household_id = ?)")
     .all(exceptId, householdId, householdId).map((p) => [p.code, p.name]));
-  const freeCode = (used) => { for (let i = 1; i < 100; i++) { const c = String(i).padStart(2, "0"); if (!used.has(c)) return c; } return null; };
+  const freeCode = (used) => { for (let i = 1; i < 1000; i++) { const c = String(i).padStart(2, "0"); if (!used.has(c)) return c; } return null; };
   // Check an address with Google before saving it, so a typo shows now and not when a ride is booked.
   const checkAddress = async (address) => {
     const r = travel.lookup ? await travel.lookup(address) : { status: "unknown" };
@@ -324,12 +324,12 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     if (!name || !address) return bad(res, "Name and address are needed.");
     if (!["home", "work", "other"].includes(kind)) return bad(res, "Kind must be home, work or other.");
     if (householdId && !db.prepare("SELECT 1 FROM households WHERE id = ?").get(householdId)) return bad(res, "That family isn't there any more.");
-    // The code is what callers press on the phone. Empty = the next free one; "1" = "01".
+    // The code is what callers press on the phone. Empty = the next free one; "1" = "01", "012" = "12".
     const used = usedCodes(householdId);
     if (!code) code = freeCode(used);
-    else if (/^\d$/.test(code)) code = `0${code}`;
-    if (!code) return bad(res, "All 99 codes are used.");
-    if (!/^\d{2}$/.test(code)) return bad(res, "The code must be 1 or 2 digits (or leave it empty).");
+    else if (!/^\d{1,3}$/.test(code)) return bad(res, "The code must be 1 to 3 digits (or leave it empty).");
+    else code = normalCode(code);
+    if (!code) return bad(res, "All 999 codes are used.");
     if (used.has(code)) return bad(res, `Code ${code} is already used by ${used.get(code)}. Code ${freeCode(used) || "--"} is free.`);
     const check = await checkAddress(address);
     if (check.error) return bad(res, check.error);
