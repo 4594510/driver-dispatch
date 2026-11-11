@@ -11,6 +11,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Driver app: Android APK. Admin dashboard: English, web.
 - Seating: front seat 1 man only; rows 2 and 3 hold 3 each, one gender per row, unless one booking marked
   "together" has the row to itself. Riders keep their seats from pickup to drop-off. See src/seating.js.
+- Relations (dashboard, Families tab): two people's relation plus a seat rule: "may sit next to each other" (that man
+  and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). Callers
+  name who is coming from their family and relatives on the phone; men/women still count everyone.
 - Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows, max 30 minutes driving.
 
 ## Stack
@@ -29,12 +32,12 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
   Key 3 at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
-  spoken step), travel.lookup finds it, it is read back in English (P56-P59), and it is never saved as a place.
-- src/phone/words.js: the prompt script P01-P59 (must match the doc's Recording script), Yiddish numbers, times, texts.
+  spoken step), travel.lookup finds it, it is read back in English (P56-P64), and it is never saved as a place.
+- src/phone/words.js: the prompt script P01-P64 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P59 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P64 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
@@ -48,6 +51,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/. A phone
   belongs to a whole family or to one person in it (phones.passenger_id); "for myself" on the phone books that person.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
+- src/relations.js: relations and seat rules between people (relations table), the riders named on a ride
+  (bookings.riders), and who a phone may name (its family and their relatives). Rules reach seating.js on each ride's
+  people.
 - src/settings.js: hours, areas, trip limit stored in the database. getSettings(db, now) puts today's schedule in.
 - src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
   wins), set by the driver app (Hours tab) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).

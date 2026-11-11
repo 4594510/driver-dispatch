@@ -26,6 +26,7 @@ import { driverRouter, setPin, driverNow } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
 import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
 import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
+import { listRelations, setRelation, removeRelation, peopleForFamily, KINDS, SEATING } from "./relations.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PHONE = /^\+1\d{10}$/;
@@ -278,6 +279,23 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   admin.delete("/priorities/:id", (req, res) => {
     const r = removePriority(db, req.params.id, req.actor);
     r.ok ? res.json(r) : bad(res, r.error);
+  });
+
+  // --- relations between people, and who may or may not sit next to whom ---
+  admin.get("/relations", (_req, res) => res.json({ relations: listRelations(db), kinds: KINDS, seating: SEATING }));
+  admin.post("/relations", (req, res) => {
+    const r = setRelation(db, req.body, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.delete("/relations/:id", (req, res) => {
+    const r = removeRelation(db, req.params.id, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  // Who a phone may name on a ride: its family and their relatives (the dashboard's booking form).
+  admin.get("/phones/:number/people", (req, res) => {
+    const phone = db.prepare("SELECT * FROM phones WHERE number = ? AND active = 1").get(normalizePhone(req.params.number));
+    if (!phone) return bad(res, "Unknown phone.");
+    res.json(peopleForFamily(db, phone.household_id).map((p) => ({ id: p.id, name: p.name, gender: p.gender, household_id: p.household_id })));
   });
 
   // --- places (saved addresses, picked by a 2-digit code on the phone) ---

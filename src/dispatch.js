@@ -11,6 +11,7 @@ import { DEFAULT_LAYOUT, seatsByStop } from "./seating.js";
 import { pointKey } from "./travel.js";
 import { timeRoute, buildRoute, fitRides, seatRoute, etas } from "./route.js";
 import { priorityOf, LEVELS } from "./priority.js";
+import { seatPeople } from "./relations.js";
 
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
@@ -21,8 +22,9 @@ export function vehicleFor(db) {
   return { id: v?.id || "main", layout: v ? JSON.parse(v.layout) : DEFAULT_LAYOUT };
 }
 
-// A booking row (or a prepared ride) with its priority level (priority.js) filled in.
-export const withPriority = (db, row) => ({ ...row, priority: priorityOf(db, row).level });
+// A booking row (or a prepared ride) with its priority level (priority.js) and its named riders with their seat rules
+// (relations.js) filled in.
+export const withPriority = (db, row) => ({ ...row, priority: priorityOf(db, row).level, people: seatPeople(db, row) });
 
 // A booking row (or a prepared ride) as the planner sees it.
 export function rideOf(row) {
@@ -31,6 +33,7 @@ export function rideOf(row) {
     men: row.men,
     women: row.women,
     together: !!row.together,
+    people: row.people || [],
     seats: row.seats ? JSON.parse(row.seats) : undefined,
     windowStart: row.pickup_minute,
     windowEnd: row.pickup_minute + row.window_minutes,

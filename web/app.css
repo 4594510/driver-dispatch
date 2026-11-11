@@ -76,3 +76,7 @@ details.fam[open] > summary { border-bottom: 1px solid var(--line); }
 .fam-body h3:first-of-type { border-top: 0; padding-top: 0; }
 details.add > summary { cursor: pointer; color: var(--accent); font-size: 14px; margin: 6px 0; width: fit-content; }
 details.add[open] { background: var(--bg); border-radius: 8px; padding: 4px 10px 8px; margin: 6px 0; }
+/* Ticked people on the booking form (who is coming). */
+.people-pick { align-items: center; }
+.people-pick > label.tick { flex: 0 0 auto; min-width: 0; display: inline-flex; gap: 6px; align-items: center; margin: 4px 12px 4px 0; }
+.people-pick > label.tick input { display: inline; width: auto; margin: 0; }

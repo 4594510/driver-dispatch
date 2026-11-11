@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P59) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P64) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -72,6 +72,12 @@ export const PROMPTS = {
   P57: "די אדרעס איז:",
   P58: "איז דאס ריכטיג? יא, דריקט 1. צו זאגן נאכאמאל, דריקט 2.",
   P59: "מיר האבן נישט געקענט געפינען די אדרעס.",
+  // Who is coming (relations.js): the caller names people from the family list, then says if others come too.
+  P60: "ווער קומט נאך מיט?",
+  P61: "צו צולייגן נאך איינעם, דריקט דעם נאמבער. צו הערן די ליסטע נאכאמאל, דריקט שטערן. ווען איר זענט פארטיג, דריקט 0.",
+  P62: "קומען נאך מענטשן מיט וואס זענען נישט אויף דער ליסטע? יא, דריקט 1. ניין, דריקט 2.",
+  P63: "וויפיל אנדערע מענער? דריקט די צאל.",
+  P64: "וויפיל אנדערע פרויען? דריקט די צאל.",
 };
 
 // Small words between pieces, recorded once like the numbers.
@@ -95,6 +101,7 @@ export const W = {
   today: "היינט",
   tomorrow: "מארגן",
   yesterday: "נעכטן",
+  added: "צוגעלייגט",
 };
 
 // Dates for the schedule: "מאנטאג", or "מאנטאג נאוועמבער זעכצן" further ahead.

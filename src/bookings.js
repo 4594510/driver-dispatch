@@ -5,6 +5,7 @@
 import { audit, newId, nowIso } from "./db.js";
 import { checkRequest, localParts, DEFAULT_SETTINGS } from "./rules.js";
 import { planSeats, DEFAULT_LAYOUT } from "./seating.js";
+import { seatPeople, peopleForFamily } from "./relations.js";
 
 const HOLDING = ["accepted", "proposed", "picked_up"];
 
@@ -32,6 +33,7 @@ export function timeline(rides, settings = DEFAULT_SETTINGS) {
     men: r.men,
     women: r.women,
     together: !!r.together,
+    people: r.people || [],
     seats: r.seats ? JSON.parse(r.seats) : undefined,
     ...idx.get(r),
   }));
@@ -42,7 +44,8 @@ export function seatCheck(db, day, candidates, settings = DEFAULT_SETTINGS, layo
     .prepare(`SELECT * FROM bookings WHERE day = ? AND status IN (${HOLDING.map(() => "?").join(",")})`)
     .all(day, ...HOLDING)
     .filter((h) => !candidates.some((c) => c.id === h.id));
-  return planSeats(timeline([...holding, ...candidates], settings), layout);
+  const rides = [...holding, ...candidates].map((r) => ({ ...r, people: seatPeople(db, r) }));
+  return planSeats(timeline(rides, settings), layout);
 }
 
 // Check a ride request against the rules and build its rows (and its return trip, if asked), without saving. input:
@@ -80,10 +83,28 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
   if (errors.length) return { ok: false, errors };
 
   let riderName = input.riderName || "";
+  let main = null;
   if (input.passengerId) {
-    const p = db.prepare("SELECT * FROM passengers WHERE id = ? AND active = 1").get(input.passengerId);
-    if (!p) return { ok: false, errors: ["unknown_passenger"] };
-    riderName = p.name;
+    main = db.prepare("SELECT * FROM passengers WHERE id = ? AND active = 1").get(input.passengerId);
+    if (!main) return { ok: false, errors: ["unknown_passenger"] };
+    riderName = main.name;
+  }
+  // The people named on the ride (the caller said who is coming): the family, or someone related to it. men and women
+  // are everyone, so they must hold at least the named men and women.
+  const allowed = new Map(peopleForFamily(db, phone.household_id).map((p) => [p.id, p]));
+  const named = [];
+  if (Array.isArray(input.riders) && input.riders.length) {
+    for (const id of input.riders.map(String)) {
+      const p = allowed.get(id) || (main?.id === id ? main : null);
+      if (!p) return { ok: false, errors: ["unknown_passenger"] };
+      if (!named.some((x) => x.id === id)) named.push(p);
+    }
+    if (main && !named.some((x) => x.id === main.id)) named.unshift(main);
+    const count = (g) => named.filter((p) => p.gender === g).length;
+    if (count("m") > men || count("f") > women) return { ok: false, errors: ["riders_count"] };
+    if (!input.riderName) riderName = named.map((p) => p.name).join(", ");
+  } else if (main) {
+    named.push(main);
   }
 
   const base = {
@@ -95,6 +116,7 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
     men,
     women,
     together: input.together ? 1 : 0,
+    riders: named.length ? JSON.stringify(named.map((p) => p.id)) : null,
     window_minutes: input.window,
   };
   const rides = [
@@ -117,8 +139,8 @@ export function saveRides(db, rides, actor) {
     insert.run(r.id, r.day, r.household_id, r.booked_by_phone, r.passenger_id, r.rider_name, r.men, r.women, r.together,
       r.pickup_place_id, r.pickup_address, r.dropoff_place_id, r.dropoff_address, r.pickup_minute, r.window_minutes,
       r.return_of, at, at);
-    db.prepare("UPDATE bookings SET pickup_lat = ?, pickup_lng = ?, dropoff_lat = ?, dropoff_lng = ? WHERE id = ?").run(
-      r.pickup_lat ?? null, r.pickup_lng ?? null, r.dropoff_lat ?? null, r.dropoff_lng ?? null, r.id);
+    db.prepare("UPDATE bookings SET pickup_lat = ?, pickup_lng = ?, dropoff_lat = ?, dropoff_lng = ?, riders = ? WHERE id = ?").run(
+      r.pickup_lat ?? null, r.pickup_lng ?? null, r.dropoff_lat ?? null, r.dropoff_lng ?? null, r.riders ?? null, r.id);
     audit(db, actor, "requested", r.id, { men: r.men, women: r.women, pickup_minute: r.pickup_minute });
   }
   return rides.map((r) => getBooking(db, r.id));

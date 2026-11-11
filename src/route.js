@@ -72,6 +72,7 @@ function seatInput(stops, rides) {
       men: r.men,
       women: r.women,
       together: !!r.together,
+      people: r.people || [],
       seats: r.seats || undefined,
       pickup: r.onBoard ? -1 : idx.get(r.id).pickup,
       dropoff: idx.get(r.id).dropoff,
@@ -85,11 +86,12 @@ export function seatRoute(stops, rides, layout = DEFAULT_LAYOUT) {
   if (!res.ok) return res;
   for (const r of rides) {
     if (!r.onBoard || !r.seats) continue;
-    if (JSON.stringify(sortRows(res.plan[r.id])) !== JSON.stringify(sortRows(r.seats))) return { ok: false, reason: "no_seating" };
+    if (JSON.stringify(countRows(res.plan[r.id])) !== JSON.stringify(countRows(r.seats))) return { ok: false, reason: "no_seating" };
   }
   return res;
 }
-const sortRows = (p) => Object.fromEntries(Object.entries(p || {}).sort());
+// Men and women per row (who exactly sits where may have been worked out before a seat rule was added).
+const countRows = (p) => Object.fromEntries(Object.entries(p || {}).sort().map(([k, v]) => [k, { men: v.men, women: v.women }]));
 
 // Does a timing stay within what was allowed? allow: { late: {id: minutes}, over: {id: minutes} } from before.
 function withinAllowance(timing, allow) {
