@@ -21,7 +21,12 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 ## Map
 - src/seating.js: seat plans across a whole route, seats by stop.
 - src/rules.js: hours, windows, keypad times, change cut-off.
-- src/bookings.js: ride requests, accept, propose time, status changes, audit.
+- src/bookings.js: checking and saving ride requests (prepareRide, saveRides), propose time, status changes.
+- src/travel.js: Google Geocoding and Routes API (computeRouteMatrix, traffic by hour), cached in geocodes and
+  travel_times; straight-line estimate without a key (ROUTES_TRAFFIC=off drops traffic).
+- src/route.js: the planner: timing a stop order, inserting a ride without making anyone later, rebuilding a day.
+- src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
+  accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/db.js: schema and audit log.
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.

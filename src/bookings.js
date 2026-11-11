@@ -45,11 +45,11 @@ export function seatCheck(db, day, candidates, settings = DEFAULT_SETTINGS, layo
   return planSeats(timeline([...holding, ...candidates], settings), layout);
 }
 
-// Create a ride request (and its return trip, if asked). input:
+// Check a ride request against the rules and build its rows (and its return trip, if asked), without saving. input:
 // { phone, passengerId?, riderName?, men, women, together, pickup: {placeId?|address}, dropoff: {...}, pickupMinute?,
 //   window, returnMinute? }
-// Returns { ok: true, bookings: [...] } or { ok: false, errors: [...] }.
-export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETTINGS) {
+// Returns { ok: true, rides: [...], phone } or { ok: false, errors: [...] }.
+export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETTINGS) {
   const phone = approvedPhone(db, input.phone);
   if (!phone) return { ok: false, errors: ["not_registered"] };
 
@@ -66,9 +66,9 @@ export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETT
       const row = db
         .prepare("SELECT * FROM places WHERE id = ? AND active = 1 AND (household_id IS NULL OR household_id = ?)")
         .get(p.placeId, phone.household_id);
-      return row ? { id: row.id, address: row.address } : null;
+      return row ? { id: row.id, address: row.address, lat: row.lat, lng: row.lng } : null;
     }
-    return p.address ? { id: null, address: p.address } : null;
+    return p.address ? { id: null, address: String(p.address).trim(), lat: null, lng: null } : null;
   };
   const from = place(input.pickup);
   const to = place(input.dropoff);
@@ -95,15 +95,17 @@ export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETT
     window_minutes: input.window,
   };
   const rides = [
-    { ...base, id: newId("bk"), pickup_place_id: from.id, pickup_address: from.address, dropoff_place_id: to.id, dropoff_address: to.address, pickup_minute: check.pickupMinute, return_of: null },
+    { ...base, id: newId("bk"), pickup_place_id: from.id, pickup_address: from.address, pickup_lat: from.lat, pickup_lng: from.lng, dropoff_place_id: to.id, dropoff_address: to.address, dropoff_lat: to.lat, dropoff_lng: to.lng, pickup_minute: check.pickupMinute, return_of: null },
   ];
   if (input.returnMinute != null) {
-    rides.push({ ...base, id: newId("bk"), pickup_place_id: to.id, pickup_address: to.address, dropoff_place_id: from.id, dropoff_address: from.address, pickup_minute: input.returnMinute, return_of: rides[0].id });
+    rides.push({ ...base, id: newId("bk"), pickup_place_id: to.id, pickup_address: to.address, pickup_lat: to.lat, pickup_lng: to.lng, dropoff_place_id: from.id, dropoff_address: from.address, dropoff_lat: from.lat, dropoff_lng: from.lng, pickup_minute: input.returnMinute, return_of: rides[0].id });
   }
 
-  const seats = seatCheck(db, day, rides, settings);
-  if (!seats.ok) return { ok: false, errors: ["no_seats"], detail: seats.reason };
+  return { ok: true, rides, phone };
+}
 
+// Save prepared rides as pending for the driver.
+export function saveRides(db, rides, actor) {
   const insert = db.prepare(`INSERT INTO bookings (id, day, household_id, booked_by_phone, passenger_id, rider_name, men, women,
     together, pickup_place_id, pickup_address, dropoff_place_id, dropoff_address, pickup_minute, window_minutes, return_of,
     status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`);
@@ -112,9 +114,21 @@ export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETT
     insert.run(r.id, r.day, r.household_id, r.booked_by_phone, r.passenger_id, r.rider_name, r.men, r.women, r.together,
       r.pickup_place_id, r.pickup_address, r.dropoff_place_id, r.dropoff_address, r.pickup_minute, r.window_minutes,
       r.return_of, at, at);
-    audit(db, `phone:${phone.number}`, "requested", r.id, { men, women, pickup_minute: r.pickup_minute });
+    db.prepare("UPDATE bookings SET pickup_lat = ?, pickup_lng = ?, dropoff_lat = ?, dropoff_lng = ? WHERE id = ?").run(
+      r.pickup_lat ?? null, r.pickup_lng ?? null, r.dropoff_lat ?? null, r.dropoff_lng ?? null, r.id);
+    audit(db, actor, "requested", r.id, { men: r.men, women: r.women, pickup_minute: r.pickup_minute });
   }
-  return { ok: true, bookings: rides.map((r) => getBooking(db, r.id)) };
+  return rides.map((r) => getBooking(db, r.id));
+}
+
+// Request a ride with the simple time-line seat check (no map). The phone line and the dashboard use dispatch.js
+// bookRide, which plans the real route; this stays for quick checks and tests.
+export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETTINGS) {
+  const prep = prepareRide(db, input, now, settings);
+  if (!prep.ok) return prep;
+  const seats = seatCheck(db, prep.rides[0].day, prep.rides, settings);
+  if (!seats.ok) return { ok: false, errors: ["no_seats"], detail: seats.reason };
+  return { ok: true, bookings: saveRides(db, prep.rides, `phone:${prep.phone.number}`) };
 }
 
 export function getBooking(db, id) {
@@ -146,12 +160,15 @@ const TRANSITIONS = {
 };
 
 // reject / cancel / pickup / done / no_show. Seats are freed simply by the status leaving the holding set.
-export function changeStatus(db, id, action, actor) {
+export function changeStatus(db, id, action, actor, now = new Date(), settings = DEFAULT_SETTINGS) {
   const t = TRANSITIONS[action];
   const b = getBooking(db, id);
   if (!t || !b) return { ok: false, errors: ["not_found"] };
   if (!t.from.includes(b.status)) return { ok: false, errors: ["wrong_status"], status: b.status };
   db.prepare("UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?").run(t.to, nowIso(), id);
+  if (action === "pickup") {
+    db.prepare("UPDATE bookings SET picked_up_minute = ? WHERE id = ?").run(localParts(now, settings.timeZone).minute, id);
+  }
   audit(db, actor, action, id, { from: b.status });
   return { ok: true, booking: getBooking(db, id) };
 }

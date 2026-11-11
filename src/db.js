@@ -143,8 +143,51 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       attempts INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     );
+
+    -- Route planning (stage 3). Addresses turned into map points, travel times between points by hour of the day
+    -- (bucket -1 when traffic is off), and each day's stop order per vehicle.
+    CREATE TABLE IF NOT EXISTS geocodes (
+      address TEXT PRIMARY KEY,                  -- lower-cased, trimmed
+      lat REAL,
+      lng REAL,                                  -- both NULL: Google found nothing (kept so we don't ask again)
+      at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS travel_times (
+      a TEXT NOT NULL,                           -- "lat,lng" to 5 decimals
+      b TEXT NOT NULL,
+      bucket INTEGER NOT NULL,                   -- hour of the day the leg starts, or -1 without traffic
+      minutes REAL NOT NULL,
+      meters INTEGER,
+      at TEXT NOT NULL,
+      PRIMARY KEY (a, b, bucket)
+    );
+    CREATE TABLE IF NOT EXISTS routes (
+      day TEXT NOT NULL,
+      vehicle_id TEXT NOT NULL,                  -- 'main' while there are no vehicles in the table
+      stops TEXT NOT NULL,                       -- JSON [{ booking_id, kind: pickup|dropoff, arrive, depart }]
+      drive_minutes REAL,
+      estimated INTEGER NOT NULL DEFAULT 0,      -- some legs were guessed from straight-line distance
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (day, vehicle_id)
+    );
   `);
+  addColumns(db, "bookings", {
+    pickup_lat: "REAL",
+    pickup_lng: "REAL",
+    dropoff_lat: "REAL",
+    dropoff_lng: "REAL",
+    picked_up_minute: "INTEGER", // when the driver marked the pickup, minutes after midnight
+    eta_dropoff_minute: "INTEGER",
+  });
   return db;
+}
+
+// Columns added after a table was first made: add them to an existing database file.
+function addColumns(db, table, cols) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, type] of Object.entries(cols)) {
+    if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  }
 }
 
 export const newId = (prefix) => `${prefix}_${crypto.randomBytes(6).toString("hex")}`;
