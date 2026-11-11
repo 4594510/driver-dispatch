@@ -34,7 +34,7 @@ h2 { font-size: 19px; margin: 0 0 6px; }
 .late { color: var(--bad); font-weight: 600; }
 .notes { background: var(--soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 label { display: block; margin: 10px 0; }
-input, select { font: inherit; width: 100%; padding: 10px; margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+input, select, textarea { font: inherit; width: 100%; padding: 10px; margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
 button { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button.ghost { background: none; color: var(--accent); }
 button.good { background: var(--good); border-color: var(--good); }
@@ -65,3 +65,5 @@ button:disabled { opacity: .5; }
 .toast { position: fixed; left: 16px; right: 16px; bottom: 20px; background: #222; color: #fff; padding: 12px 14px; border-radius: 10px; z-index: 6; text-align: center; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { flex: 1; min-width: 72px; }
+.prio { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 2px 8px; border-radius: 99px; font-size: 13px; font-weight: 700; background: #fbeed9; color: #6b3d00; }
+.prio.p2 { background: var(--bad); color: #fff; }

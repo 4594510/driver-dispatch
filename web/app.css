@@ -47,3 +47,5 @@ th { color: var(--quiet); font-weight: 500; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; }
 .actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .actions button { padding: 3px 8px; font-size: 13px; }
+.prio { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #fbeed9; color: #6b3d00; }
+.prio.p2 { background: var(--bad); color: #fff; }

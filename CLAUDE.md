@@ -46,6 +46,12 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/settings.js: hours, areas, trip limit stored in the database. getSettings(db, now) puts today's schedule in.
 - src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
   wins), set by the driver app (Hours tab) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).
+- src/priority.js: priority levels (Normal, High, Top) an admin sets for a family or one person, always or for a
+  local time range. Used by dispatch.js: the driver's requests are sorted by it, the accept preview warns when a ride
+  would leave no room for a waiting higher-priority one, and the planner weighs higher-priority waiting more. It never
+  moves an accepted ride later.
 - src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
   and miles from GPS) and announcements (deliveries queued until the phone line is connected).
+- src/feedback.js: comments, complaints, suggestions and requests from the dashboard and driver app; Claude reads
+  and answers them at /api/feedback (scripts/feedback.mjs). docs/feedback-check.md: how the regular check works.
 - web/: the admin dashboard (plain JS, one page).

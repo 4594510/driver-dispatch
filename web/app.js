@@ -50,6 +50,15 @@ const minuteText = (m) => {
 const timeToMinute = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
 const minuteToTime = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const STATUS = { pending: "Waiting for driver", proposed: "New time offered", accepted: "Accepted", picked_up: "On board", completed: "Completed", rejected: "Rejected", cancelled: "Cancelled", no_show: "No-show" };
+// The admin's priority level on a ride or person: a badge for High and Top, nothing for normal.
+const prioBadge = (x) => (x?.priority > 0 ? ` <span class="prio p${x.priority}">${esc(x.priority_label || "High")}</span>` : "");
+const PRIO_LEVELS = { 1: "High", 2: "Top" };
+const whenText = (p) => {
+  const t = (v) => new Date(`${v}:00`).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  if (!p.starts_at && !p.ends_at) return "Always";
+  if (p.ends_at && p.ends_at < new Date().toLocaleString("sv-SE", { timeZone: "America/New_York" }).slice(0, 16).replace(" ", "T")) return `Ended ${t(p.ends_at)}`;
+  return `${p.starts_at ? `From ${t(p.starts_at)}` : "Now"}${p.ends_at ? ` until ${t(p.ends_at)}` : " on"}`;
+};
 const riders = (b) => [b.men && `${b.men} ${b.men === 1 ? "man" : "men"}`, b.women && `${b.women} ${b.women === 1 ? "woman" : "women"}`].filter(Boolean).join(", ") + (b.together ? " (may sit together)" : "");
 
 // ---------- login ----------
@@ -66,7 +75,7 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#logout").addEventListener("click", async () => { await api("/api/logout", { method: "POST", body: {} }); showLogin(); });
 
 // ---------- tabs ----------
-const TABS = { today, pending, families, places, schedule, announce, reports, settings, activity };
+const TABS = { today, pending, families, places, schedule, announce, reports, settings, activity, feedback };
 let current = "today";
 $("#tabs").addEventListener("click", (e) => { const t = e.target.dataset.tab; if (t) open(t); });
 function open(tab) {
@@ -99,7 +108,7 @@ function bookingTable(rows, { showDay = false } = {}) {
     <tr data-id="${esc(b.id)}">
       ${showDay ? `<td>${esc(b.day)}</td>` : ""}
       <td>${minuteText(b.pickup_minute)}<div class="quiet">${b.window_minutes}-min window${b.proposed_minute != null ? `<br>offered ${minuteText(b.proposed_minute)}` : ""}</div></td>
-      <td>${esc(b.rider_name || "")}<div class="quiet">${esc(riders(b))}<br>${esc(b.booked_by_phone)}</div></td>
+      <td>${esc(b.rider_name || "")}${prioBadge(b)}<div class="quiet">${esc(riders(b))}<br>${esc(b.booked_by_phone)}</div></td>
       <td>${esc(b.pickup_address)}<br>→ ${esc(b.dropoff_address)}${b.return_of ? '<div class="quiet">return trip</div>' : ""}</td>
       <td><span class="status ${esc(b.status)}">${esc(STATUS[b.status] || b.status)}</span></td>
       <td class="actions">${bookingButtons(b)}</td>
@@ -143,9 +152,11 @@ function wireBookings(el, reload) {
       const names = Object.fromEntries((await api("/api/admin/bookings")).map((b) => [b.id, b.rider_name || b.booked_by_phone]));
       const moves = Object.entries(p.shifts).flatMap(([bid, k]) => Object.entries(k).map(([kind, [from, to]]) =>
         `  ${names[bid] || "a rider"}: ${kind === "pickup" ? "pickup" : "drop-off"} ${minuteText(from)} → ${minuteText(to)}`));
-      const text = `Pickup about ${minuteText(p.eta)}.\nDriving today: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes.` +
+      const blocks = (p.blocks || []).map((x) => `  ${x.rider_name || "a rider"} (${x.label} priority, ${minuteText(x.window[0])})`);
+      const text = (blocks.length ? `WAIT: accepting this leaves no room for a higher-priority ride that is also waiting:\n${blocks.join("\n")}\nHigher priority should go first.\n\n` : "") +
+        `Pickup about ${minuteText(p.eta)}.\nDriving today: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes.` +
         (moves.length ? `\nTimes that move:\n${moves.join("\n")}` : "\nNobody else's time moves.") +
-        (p.after.estimated ? "\n(Some drive times are estimates.)" : "") + "\n\nAccept this ride?";
+        (p.after.estimated ? "\n(Some drive times are estimates.)" : "") + (blocks.length ? "\n\nAccept this ride anyway?" : "\n\nAccept this ride?");
       if (!confirm(text)) return;
     }
     if (a === "propose") {
@@ -244,14 +255,15 @@ function routeCard(r) {
 const placeOptions = (places) => places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} ${esc(p.name)}${p.household_id ? "" : " (shared)"}</option>`).join("");
 
 async function pending() {
-  const rows = [...(await api("/api/admin/bookings?status=pending")), ...(await api("/api/admin/bookings?status=proposed"))];
+  const rows = [...(await api("/api/admin/bookings?status=pending")), ...(await api("/api/admin/bookings?status=proposed"))]
+    .sort((a, b) => b.day.localeCompare(a.day) || (b.priority || 0) - (a.priority || 0) || a.pickup_minute - b.pickup_minute);
   main.innerHTML = `<div class="card"><h2>Waiting for the driver</h2><div id="list">${bookingTable(rows, { showDay: true })}</div></div>`;
   wireBookings($("#list"), () => open("pending"));
 }
 
 // ---------- families ----------
 async function families() {
-  const fams = await api("/api/admin/households");
+  const [fams, prios] = await Promise.all([api("/api/admin/households"), api("/api/admin/priorities")]);
   main.innerHTML = `
     <div class="card"><h2>Add a family</h2><form id="add-fam" class="row"><label>Family name <input name="name" required></label><button>Add</button></form></div>
     ${fams.map((h) => `
@@ -265,6 +277,16 @@ async function families() {
           <label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Man or woman <select name="gender"><option value="m">Man</option><option value="f">Woman</option></select></label>
           <label>Notes for the driver <input name="notes"></label><button>Add person</button></form>
+        <h3>Priority</h3>
+        <p class="quiet">Higher priority goes first when rides compete for the same seats or time. It never moves a ride the driver already accepted.</p>
+        <table><tbody>${prios.filter((x) => x.household_id === h.id).map((x) => `<tr data-pri="${esc(x.id)}"><td>${esc(x.passenger_name || "Whole family")}</td>
+          <td><span class="prio p${x.level}">${esc(x.label)}</span></td><td>${esc(whenText(x))}</td><td class="quiet">${esc(x.note)}</td>
+          <td class="actions"><button class="danger" data-act="remove-pri">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">Normal priority.</td></tr>'}</tbody></table>
+        <form class="row" data-form="pri"><label>Who <select name="passengerId"><option value="">Whole family</option>${h.passengers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label>
+          <label>Level <select name="level">${Object.entries(PRIO_LEVELS).map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select></label>
+          <label>From (empty = now) <input name="from" type="datetime-local"></label>
+          <label>Until (empty = always) <input name="to" type="datetime-local"></label>
+          <label>Note (optional) <input name="note" placeholder="for example: doctor visits"></label><button>Add priority</button></form>
         <h3>Approved phones</h3>
         <table><tbody>${h.phones.map((p) => `<tr data-ph="${esc(p.number)}"><td>${esc(p.number)}</td>
           <td><select data-act="notify">${["both", "text", "voice"].map((n) => `<option value="${n}" ${p.notify === n ? "selected" : ""}>${n === "both" ? "Texts and calls" : n === "text" ? "Texts only" : "Calls only"}</option>`).join("")}</select></td>
@@ -289,7 +311,7 @@ async function families() {
     e.preventDefault();
     const hh = e.target.closest("[data-hh]").dataset.hh;
     const f = Object.fromEntries(new FormData(e.target));
-    const path = { ps: "passengers", ph: "phones", pl: "places" }[kind];
+    const path = { ps: "passengers", ph: "phones", pl: "places", pri: "priorities" }[kind];
     if (await act(() => api(`/api/admin/${path}`, { method: "POST", body: { ...f, householdId: hh } }), "Added")) open("families");
   });
   main.addEventListener("change", async (e) => {
@@ -304,7 +326,9 @@ async function families() {
     const ps = e.target.closest("[data-ps]")?.dataset.ps;
     const ph = e.target.closest("[data-ph]")?.dataset.ph;
     const pl = e.target.closest("[data-pl]")?.dataset.pl;
+    const pri = e.target.closest("[data-pri]")?.dataset.pri;
     let done = false;
+    if (a === "remove-pri" && confirm("Remove this priority?")) done = await act(() => api(`/api/admin/priorities/${pri}`, { method: "DELETE" }), "Removed");
     if (a === "rename") { const n = prompt("New family name"); if (n) done = await act(() => api(`/api/admin/households/${hh}`, { method: "PATCH", body: { name: n } })); }
     if (a === "remove-fam" && confirm("Remove this family and all its phones?")) done = await act(() => api(`/api/admin/households/${hh}`, { method: "DELETE" }));
     if (a === "edit-ps") {
@@ -447,6 +471,40 @@ async function announce() {
       toast(`Queued for ${r.phones} phones`);
       open("announce");
     });
+  });
+}
+
+// ---------- feedback ----------
+// Comments, complaints, suggestions and requests. Claude checks new ones regularly, does what is asked, and writes
+// back here what it did or what it needs from you.
+const FB_STATUS = { new: "New", working: "Claude is on it", needs_you: "Needs you", done: "Done", declined: "Not done" };
+const FB_CLASS = { new: "pending", working: "accepted", needs_you: "proposed", done: "completed", declined: "rejected" };
+async function feedback() {
+  const list = await api("/api/admin/feedback");
+  main.innerHTML = `
+    <div class="card"><h2>Comments, complaints, suggestions, requests</h2>
+      <form id="fb">
+        <label>What kind <select name="kind"><option value="request">Request</option><option value="suggestion">Suggestion</option><option value="complaint">Complaint</option><option value="comment">Comment</option></select></label>
+        <label>Write it here <textarea name="text" rows="4" required></textarea></label>
+        <button>Send</button>
+        <p class="quiet">Claude reads these regularly, does what is asked, and writes back below. If something is needed from you, it shows "Needs you".</p>
+      </form></div>
+    <div class="card"><h2>Sent</h2>${list.length ? `<div class="wrap"><table><thead><tr><th>When</th><th>From</th><th>What</th><th>Status</th><th></th></tr></thead><tbody>${list.map((f) => `
+      <tr data-fb="${esc(f.id)}"><td>${esc(new Date(f.created_at).toLocaleString())}</td><td>${f.source === "driver" ? "Driver" : esc(f.author)}</td>
+      <td><b>${esc(f.kind[0].toUpperCase() + f.kind.slice(1))}:</b> ${esc(f.text).replace(/\n/g, "<br>")}${f.reply ? `<div class="quiet">Answer: ${esc(f.reply).replace(/\n/g, "<br>")}</div>` : ""}</td>
+      <td><span class="status ${FB_CLASS[f.status] || ""}">${esc(FB_STATUS[f.status] || f.status)}</span></td>
+      <td class="actions">${["done", "declined"].includes(f.status) ? '<button class="ghost" data-act="fb-reopen">Reopen</button>' : '<button class="ghost" data-act="fb-close">Close</button>'}</td></tr>`).join("")}</tbody></table></div>` : '<p class="quiet">Nothing yet.</p>'}</div>`;
+  $("#fb").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    if (await act(() => api("/api/admin/feedback", { method: "POST", body: { kind: f.get("kind"), text: f.get("text") } }), "Sent. Claude will look at it.")) open("feedback");
+  });
+  main.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    const id = b?.closest("[data-fb]")?.dataset.fb;
+    if (!id) return;
+    const status = b.dataset.act === "fb-close" ? "done" : "new";
+    if (await act(() => api(`/api/admin/feedback/${id}`, { method: "PATCH", body: { status } }), status === "done" ? "Closed" : "Reopened")) open("feedback");
   });
 }
 

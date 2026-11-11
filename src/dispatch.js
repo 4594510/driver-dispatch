@@ -10,6 +10,7 @@ import { localParts, DEFAULT_SETTINGS } from "./rules.js";
 import { DEFAULT_LAYOUT, seatsByStop } from "./seating.js";
 import { pointKey } from "./travel.js";
 import { timeRoute, buildRoute, fitRides, seatRoute, etas } from "./route.js";
+import { priorityOf, LEVELS } from "./priority.js";
 
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
@@ -19,6 +20,9 @@ export function vehicleFor(db) {
   const v = db.prepare("SELECT * FROM vehicles ORDER BY rowid LIMIT 1").get();
   return { id: v?.id || "main", layout: v ? JSON.parse(v.layout) : DEFAULT_LAYOUT };
 }
+
+// A booking row (or a prepared ride) with its priority level (priority.js) filled in.
+export const withPriority = (db, row) => ({ ...row, priority: priorityOf(db, row).level });
 
 // A booking row (or a prepared ride) as the planner sees it.
 export function rideOf(row) {
@@ -34,6 +38,7 @@ export function rideOf(row) {
     to: pointKey(row.dropoff_lat, row.dropoff_lng),
     onBoard: row.status === "picked_up",
     pickedUpAt: row.picked_up_minute ?? undefined,
+    priority: row.priority ?? 0,
   };
 }
 
@@ -66,7 +71,8 @@ export async function locate(db, travel, rides) {
 function routedRows(db, day) {
   return db
     .prepare(`SELECT * FROM bookings WHERE day = ? AND status IN (${ROUTED.map(() => "?").join(",")}) ORDER BY pickup_minute`)
-    .all(day, ...ROUTED);
+    .all(day, ...ROUTED)
+    .map((r) => withPriority(db, r));
 }
 
 function driverPoint(db, now) {
@@ -196,7 +202,7 @@ function suggestTimes(db, day, prepared, ctx, settings, now) {
       if (m < settings.openMinute || m > settings.closeMinute) continue;
       if (day === here.day && m < here.minute) continue;
       if (prepared[1] && prepared[1].pickup_minute <= m) continue;
-      const moved = prepared.map((r, i) => rideOf(i === 0 ? { ...r, pickup_minute: m } : r));
+      const moved = prepared.map((r, i) => rideOf(withPriority(db, i === 0 ? { ...r, pickup_minute: m } : r)));
       const plan = planDay(db, day, moved, ctx);
       if (plan.after.ok) found.push(m);
       if (found.length >= 2) break;
@@ -213,7 +219,7 @@ export async function bookRide(db, travel, input, now = new Date(), settings = D
   await locate(db, travel, prep.rides);
   const day = prep.rides[0].day;
   const ctx = contextFor(db, travel, settings, day, now);
-  const newRides = prep.rides.map(rideOf);
+  const newRides = prep.rides.map((r) => rideOf(withPriority(db, r)));
   await travel.ensure(newRides.map((r) => ({ a: r.from, b: r.to, minute: r.windowStart })));
   for (const r of newRides) {
     const direct = travel.minutes(r.from, r.to, r.windowStart).minutes;
@@ -232,9 +238,31 @@ export async function bookRide(db, travel, input, now = new Date(), settings = D
 async function planWith(db, travel, b, settings, now) {
   await locate(db, travel, [b]);
   const ctx = contextFor(db, travel, settings, b.day, now);
-  const ride = rideOf(b);
+  const ride = rideOf(withPriority(db, b));
   await prefetch(db, travel, [...routedRows(db, b.day).map(rideOf), ride], ctx);
-  return planDay(db, b.day, [ride], ctx);
+  return { ...planDay(db, b.day, [ride], ctx), ctx, ride };
+}
+
+// Waiting requests with a higher priority than this one that fit the route now but would no longer fit once this ride
+// is accepted: [{ id, rider_name, priority, label, window }]. The driver sees this before accepting.
+async function priorityBlocks(db, travel, b, p) {
+  const waiting = db
+    .prepare("SELECT * FROM bookings WHERE day = ? AND status IN ('pending', 'proposed') AND id != ? ORDER BY pickup_minute")
+    .all(b.day, b.id)
+    .map((r) => withPriority(db, r))
+    .filter((r) => r.priority > p.ride.priority);
+  if (!waiting.length) return [];
+  await locate(db, travel, waiting);
+  const rides = waiting.filter((r) => r.pickup_lat != null && r.dropoff_lat != null).map(rideOf);
+  await prefetch(db, travel, [...p.rides, p.ride, ...rides], p.ctx);
+  const out = [];
+  for (const w of rides) {
+    if (!fitRides(p.stops, p.rides, [w], p.ctx, p.layout).ok) continue; // no room for it anyway
+    if (fitRides(p.after.stops, [...p.rides, p.ride], [w], p.ctx, p.layout).ok) continue; // both fit
+    const row = waiting.find((x) => x.id === w.id);
+    out.push({ id: w.id, rider_name: row.rider_name, priority: w.priority, label: LEVELS[w.priority], window: [w.windowStart, w.windowEnd] });
+  }
+  return out;
 }
 
 // What accepting a pending ride would do: the route before and after, and whose times move.
@@ -251,6 +279,8 @@ export async function previewAccept(db, travel, id, settings = DEFAULT_SETTINGS,
     after: describe(p.after.stops, p.after.timing),
     shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops),
     eta: Math.round(etas(p.after.stops, p.after.timing)[id].pickup),
+    priority: { level: p.ride.priority, label: LEVELS[p.ride.priority] },
+    blocks: await priorityBlocks(db, travel, b, p),
   };
 }
 
@@ -261,12 +291,15 @@ export async function acceptRide(db, travel, id, driverId, settings = DEFAULT_SE
   if (!["pending", "proposed"].includes(b.status)) return { ok: false, errors: ["not_pending"] };
   const p = await planWith(db, travel, b, settings, now);
   if (!p.after.ok) return { ok: false, errors: [p.after.reason] };
+  const blocks = await priorityBlocks(db, travel, b, p);
   const fresh = getBooking(db, id);
   if (!["pending", "proposed"].includes(fresh.status)) return { ok: false, errors: ["not_pending"] };
   db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, updated_at = ? WHERE id = ?").run(driverId, nowIso(), id);
   saveRoute(db, b.day, p.after.stops, p.after.timing, p.after.seats);
-  audit(db, `driver:${driverId}`, "accepted", id, { shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops) });
-  return { ok: true, booking: getBooking(db, id) };
+  const details = { shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops) };
+  if (blocks.length) details.blocksPriority = blocks.map((x) => x.id);
+  audit(db, `driver:${driverId}`, "accepted", id, details);
+  return { ok: true, booking: getBooking(db, id), blocks };
 }
 
 // Re-time the day after a cancel, pickup, drop-off, no-show or address change. Riders on board keep their seats.
@@ -274,7 +307,7 @@ export async function refreshDay(db, travel, day, settings = DEFAULT_SETTINGS, n
   const rows = routedRows(db, day);
   await locate(db, travel, rows);
   const ctx = contextFor(db, travel, settings, day, now);
-  const rides = rows.map((r) => rideOf(getBooking(db, r.id)));
+  const rides = rows.map((r) => rideOf(withPriority(db, getBooking(db, r.id))));
   await prefetch(db, travel, rides, ctx);
   const p = planDay(db, day, [], ctx);
   if (!p.rides.length) {
@@ -339,8 +372,11 @@ export function dayRoute(db, day) {
   if (!row) return { day, stops: [], driveMinutes: 0, estimated: false, seatsByStop: [] };
   const stops = JSON.parse(row.stops).map((s) => {
     const b = getBooking(db, s.booking_id);
+    const pr = b ? priorityOf(db, b) : { level: 0, label: LEVELS[0] };
     return {
       ...s,
+      priority: pr.level,
+      priority_label: pr.label,
       rider_name: b?.rider_name,
       household_id: b?.household_id,
       status: b?.status,

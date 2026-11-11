@@ -250,6 +250,32 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS schedule_changes_days ON schedule_changes (to_day, from_day);
+    -- Priority levels an admin sets for a family (passenger_id NULL) or one person, always or between two local
+    -- times ("2026-11-12T10:00"; NULL = no start or no end). See priority.js.
+    CREATE TABLE IF NOT EXISTS priorities (
+      id TEXT PRIMARY KEY,
+      household_id TEXT NOT NULL REFERENCES households(id),
+      passenger_id TEXT REFERENCES passengers(id),
+      level INTEGER NOT NULL,                    -- 1 High, 2 Top (0 Normal is no rule)
+      starts_at TEXT,
+      ends_at TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+    -- Comments, complaints, suggestions and requests from the dashboard and the driver app (feedback.js).
+    CREATE TABLE IF NOT EXISTS feedback (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,                      -- admin | driver
+      author TEXT NOT NULL,                      -- the admin's email or the driver's id
+      kind TEXT NOT NULL,                        -- comment | complaint | suggestion | request
+      text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',        -- new | working | needs_you | done | declined
+      reply TEXT,                                -- what was done, or what is needed
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
 }
