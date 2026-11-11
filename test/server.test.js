@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, normalizePhone } from "../src/server.js";
 import { openDb } from "../src/db.js";
+import { webhookAllowed } from "../src/phone/fonory.js";
 
 async function withServer(fn, deps = {}) {
   const db = openDb(":memory:");
@@ -145,4 +146,16 @@ test("the phone line needs Fonory's secret key, then answers each step", async (
     assert.equal(status.status, 200);
     assert.equal((await call("/audio/../data.db")).status, 404);
   });
+});
+
+test("Teltech's servers get in by their address; anyone else needs the key", () => {
+  const req = (ip, key) => ({ ip, query: key ? { key } : {}, get: () => undefined });
+  const env = { FONORY_WEBHOOK_KEY: "hook-secret", FONORY_ALLOWED_IPS: "178.156.145.236, 10.0.0.9" };
+  assert.equal(webhookAllowed(req("178.156.145.236"), env), true);
+  assert.equal(webhookAllowed(req("::ffff:178.156.145.236"), env), true);
+  assert.equal(webhookAllowed(req("10.0.0.9"), env), true);
+  assert.equal(webhookAllowed(req("203.0.113.5"), env), false);
+  assert.equal(webhookAllowed(req("203.0.113.5", "hook-secret"), env), true);
+  assert.equal(webhookAllowed(req(""), { FONORY_ALLOWED_IPS: "" }), false);
+  assert.equal(webhookAllowed(req("178.156.145.236"), { FONORY_WEBHOOK_KEY: "hook-secret" }), false, "no list, no address pass");
 });

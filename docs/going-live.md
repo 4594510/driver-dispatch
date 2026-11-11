@@ -16,10 +16,14 @@ About $5 to $10 a month for this size.
 
 ## 2. The phone line (Fonory)
 
-1. Upload the 47 prompt recordings (`recordings/` in the project files) to Fonory under their codes (P01 … P47).
-2. Point Fonory's step webhook at `<PUBLIC_URL>/fonory/step` and the call-status webhook at `<PUBLIC_URL>/fonory/status`,
-   both with the header `X-Fonory-Key: <FONORY_WEBHOOK_KEY>` (or `?key=` on the address).
-3. When Teltech sends their API documentation: set `FONORY_API_URL`, `FONORY_API_KEY`, `FONORY_FROM`, and adapt
+The line is 845-731-5290 (`FONORY_FROM=+18457315290`). Teltech's calls come from 178.156.145.236
+(`FONORY_ALLOWED_IPS`, comma-separated if they add more); requests from there need no key.
+
+1. Upload the prompt recordings (`recordings/` in the project files) to Fonory under their codes (P01 … P53).
+2. Point Fonory's step webhook at `<PUBLIC_URL>/fonory/step` and the call-status webhook at `<PUBLIC_URL>/fonory/status`.
+   From any other address they need the header `X-Fonory-Key: <FONORY_WEBHOOK_KEY>` (or `?key=` on the address).
+   A refused request is logged as "phone line: refused … from <address>".
+3. When Teltech sends their API documentation: set `FONORY_API_URL`, `FONORY_API_KEY`, and adapt
    `src/phone/fonory.js` if their requests differ. Until then calls in work, and outgoing texts and calls wait in the queue.
 
 ## 3. The driver's phone

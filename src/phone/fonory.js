@@ -1,7 +1,10 @@
 // The Fonory (Teltech) connection.
 //
 // Incoming: Fonory calls POST /fonory/step at every live step and POST /fonory/status with how an outgoing call
-// ended; both must carry our secret, FONORY_WEBHOOK_KEY, as the X-Fonory-Key header or ?key=.
+// ended. A request is let in when it carries our secret, FONORY_WEBHOOK_KEY, as the X-Fonory-Key header or ?key=,
+// or when it comes from one of Teltech's servers, FONORY_ALLOWED_IPS (comma-separated; 178.156.145.236 as of
+// 2026-11-11). The address is req.ip: with "trust proxy" 1 that is the one Railway's edge saw, not one a caller wrote
+// into X-Forwarded-For.
 //
 // Outgoing: we ask Fonory to place a call (it then runs our steps, starting with step "out:<delivery id>") or to send
 // a text. Teltech's API documentation hasn't arrived yet, so the two requests below follow the contract in the phone
@@ -9,7 +12,17 @@
 // Until those are set nothing goes out, and deliveries wait in the queue.
 import crypto from "node:crypto";
 
+// "::ffff:1.2.3.4" → "1.2.3.4"
+const plainIp = (ip) => String(ip || "").trim().replace(/^::ffff:/i, "");
+
+export function fromTeltech(req, env = process.env) {
+  const allowed = String(env.FONORY_ALLOWED_IPS || "").split(",").map(plainIp).filter(Boolean);
+  const ip = plainIp(req.ip);
+  return Boolean(ip) && allowed.includes(ip);
+}
+
 export function webhookAllowed(req, env = process.env) {
+  if (fromTeltech(req, env)) return true;
   const want = env.FONORY_WEBHOOK_KEY;
   if (!want) return false;
   const got = String(req.get("x-fonory-key") || req.query.key || "");
