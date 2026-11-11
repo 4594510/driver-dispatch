@@ -82,8 +82,8 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#logout").addEventListener("click", async () => { await api("/api/logout", { method: "POST", body: {} }); showLogin(); });
 
 // ---------- tabs ----------
-const TABS = { today, pending, families, places, schedule, announce, reports, settings, activity, feedback };
-let current = "today";
+const TABS = { home, today, pending, families, places, schedule, announce, reports, settings, activity, feedback };
+let current = "home";
 $("#tabs").addEventListener("click", (e) => { const t = e.target.dataset.tab; if (t) open(t); });
 function open(tab) {
   current = tab;
@@ -103,9 +103,37 @@ async function start() {
   $("#me").textContent = me.email;
   $("#login").hidden = true;
   $("#app").hidden = false;
-  let tab = "today";
+  let tab = "home";
   try { tab = localStorage.getItem("dd.tab") || tab; } catch {}
-  open(TABS[tab] ? tab : "today");
+  open(TABS[tab] ? tab : "home");
+}
+
+// ---------- overview ----------
+// The home page: today's numbers at a glance (each opens its tab), the driver, and the next rides.
+async function home() {
+  const [rows, drivers, fb] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/drivers"), api("/api/admin/feedback").catch(() => [])]);
+  const count = (...st) => rows.filter((b) => st.includes(b.status)).length;
+  const tile = (n, label, tab, cls = "") => `<button class="stat tile ${cls}" data-go="${tab}"><b>${n}</b>${label}</button>`;
+  const waiting = count("pending", "proposed");
+  const fbOpen = fb.filter((f) => ["new", "needs_you"].includes(f.status)).length;
+  const next = rows.filter((b) => ["pending", "proposed", "accepted", "picked_up"].includes(b.status))
+    .sort((a, b) => a.pickup_minute - b.pickup_minute).slice(0, 8);
+  main.innerHTML = `
+    <h1>Overview</h1>
+    <div class="stats">
+      ${tile(rows.length, "Rides today", "today")}
+      ${tile(waiting, "Waiting for driver", "pending", waiting ? "alert" : "")}
+      ${tile(count("accepted"), "Accepted", "today")}
+      ${tile(count("picked_up"), "On board", "today")}
+      ${tile(count("completed"), "Completed", "today")}
+      ${tile(fbOpen, "Feedback to read", "feedback", fbOpen ? "alert" : "")}
+    </div>
+    <div class="card"><h2>Driver</h2>${drivers.map((d) => `<p>${driverLine(d)}</p>`).join("") || '<p class="quiet">No driver yet (Settings).</p>'}</div>
+    <div class="card"><h2>Next rides</h2>${next.length ? `<div class="wrap"><table><tbody>${next.map((b) => `<tr>
+      <td>${minuteText(b.pickup_minute)}</td><td>${esc(b.rider_name || b.booked_by_phone)}${prioBadge(b)}<div class="quiet">${esc(riders(b))}</div></td>
+      <td>${esc(b.pickup_address)} → ${esc(b.dropoff_address)}</td><td><span class="status ${esc(b.status)}">${esc(STATUS[b.status] || b.status)}</span></td></tr>`).join("")}</tbody></table></div>
+      <p><button class="ghost" data-go="today">All of today</button></p>` : '<p class="quiet">No rides waiting.</p>'}</div>`;
+  main.addEventListener("click", (e) => { const t = e.target.closest("[data-go]"); if (t) open(t.dataset.go); });
 }
 
 // ---------- bookings ----------
