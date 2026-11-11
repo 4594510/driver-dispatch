@@ -12,7 +12,8 @@ an Android driver app, and an admin web dashboard.
 - `GOOGLE_MAPS_API_KEY`: needs the **Routes API** and the **Geocoding API** turned on. Without it, drive times are
   straight-line estimates and the route says so.
 - `ROUTES_TRAFFIC=off`: plain drive times instead of live traffic (cheaper).
-- `DB_FILE` (default `data/dispatch.db`), `RECORDINGS_DIR`, `PORT`.
+- `DB_FILE` (default `data/dispatch.db`), `RECORDINGS_DIR`, `PORT`, `BACKUP_DIR` (default `data/backups`, a copy a
+  day), `BACKUP_KEEP` (14).
 - `PUBLIC_URL`: this server's https address, for the audio links Fonory plays.
 - `FONORY_WEBHOOK_KEY`: the secret Fonory sends with every request (`X-Fonory-Key` header or `?key=`). Without it the
   phone line answers nothing.
@@ -31,3 +32,16 @@ from `/audio/...`; until then Fonory's own Yiddish voice says them.
 
 Map costs stay small: each address is looked up once, and each drive time between two points is fetched once per
 hour of the day and kept 14 days.
+
+## The driver app
+
+The driver signs in with their phone number and a PIN set on the dashboard (Settings → Drivers). The app is the page
+at `/driver/` (Next stop, Requests with a before/after preview, the Day's stops in an order the driver can change,
+Online / Pause / Offline, Running late), in an Android wrapper (`android/`) that adds GPS with the screen off and a
+ringing notification for new requests. GitHub Actions builds the APK ("Driver app" workflow) and publishes it as the
+`driver-app` release. Without signal, actions and GPS points wait on the phone and are sent later, each action once.
+
+## Going live
+
+See [docs/going-live.md](docs/going-live.md): Railway with a volume, Fonory, the driver's phone, the test plan and the
+pilot week.

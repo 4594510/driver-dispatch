@@ -8,6 +8,7 @@ import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
 import { keypadTime, localParts, canChangePickup } from "../rules.js";
 import { W, numberWords, timePieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
+import { driverAvailable } from "../driver.js";
 
 const ACTIVE = ["pending", "proposed", "accepted", "picked_up"];
 const CANCELLABLE = ["pending", "proposed", "accepted"];
@@ -175,8 +176,7 @@ async function book(c) {
   if (r.ok) {
     c.st.draft = null;
     for (const b of r.bookings) c.notify?.(b, "booked");
-    const driver = c.db.prepare("SELECT status FROM drivers ORDER BY rowid LIMIT 1").get();
-    return end([P(driver?.status === "paused" ? "P22" : "P21")]);
+    return end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]);
   }
   const refusal = P(REFUSALS[r.errors[0]] || "P42");
   if (r.suggestions?.length) {

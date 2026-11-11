@@ -21,3 +21,21 @@ test("reports count rides by outcome and passengers carried", () => {
   assert.equal(r.accepted, 2);
   assert.equal(r.pending, 1);
 });
+
+test("the daily backup is a readable copy, and old copies are removed", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { backupNow, backupDue } = await import("../src/backup.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dd-backup-"));
+  const db = openDb(path.join(dir, "live.db"));
+  db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'A', 'x')").run();
+  const out = path.join(dir, "backups");
+  assert.equal(backupDue(out, new Date("2026-11-11T05:00:00Z")), true);
+  for (let d = 1; d <= 4; d++) backupNow(db, out, 3, new Date(`2026-11-0${d}T05:00:00Z`));
+  assert.deepEqual(fs.readdirSync(out).sort(), ["dispatch-2026-11-02-05-00-00.db", "dispatch-2026-11-03-05-00-00.db", "dispatch-2026-11-04-05-00-00.db"]);
+  assert.equal(backupDue(out, new Date("2026-11-04T20:00:00Z")), false);
+  const copy = openDb(path.join(out, "dispatch-2026-11-04-05-00-00.db"));
+  assert.equal(copy.prepare("SELECT name FROM households").get().name, "A");
+  fs.rmSync(dir, { recursive: true, force: true });
+});

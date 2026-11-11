@@ -1,0 +1,456 @@
+// The driver app: one page, talking to /api/driver. Inside the Android app it also uses the native bridge
+// (window.DriverNative) for GPS in the background and notifications; in a plain browser it uses the browser's GPS
+// while the page is open.
+//
+// Without signal: today's data is kept on the phone, actions wait in a queue (each with its own key, so the server
+// does it once) and are sent when the signal comes back; GPS points wait the same way.
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const native = window.DriverNative || null;
+const store = {
+  get: (k, d = null) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* full or blocked */ } },
+  del: (k) => { try { localStorage.removeItem(k); } catch { /* blocked */ } },
+};
+
+let token = store.get("driver.token");
+let today = store.get("driver.today");
+let tab = "next";
+let queue = store.get("driver.queue", []);
+let seenRequests = new Set(store.get("driver.seen", []));
+let lastOk = store.get("driver.lastOk");
+let reorder = null; // the Day tab's order while the driver is moving stops
+
+const ERRORS = {
+  not_pending: "This ride isn't waiting for an answer any more.", no_time: "The route can't fit this ride without making others late.",
+  no_seats: "The seats don't work for this.", wrong_status: "Not possible now (the ride changed).", bad_time: "Choose a time within service hours.",
+  dropoff_before_pickup: "A drop-off can't come before its pickup.", route_changed: "The route changed meanwhile. Look again.",
+  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.",
+};
+const errText = (data) => (data?.errors || []).map((e) => ERRORS[e] || e).join(" ") || data?.error || "Something went wrong.";
+
+function toast(msg, ms = 3000) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => (t.hidden = true), ms);
+}
+
+const minuteText = (m) => {
+  if (m == null) return "";
+  m = Math.round(m);
+  const h24 = Math.floor(m / 60);
+  return `${((h24 + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`;
+};
+const people = (x) => [x.men ? `${x.men} ${x.men === 1 ? "man" : "men"}` : "", x.women ? `${x.women} ${x.women === 1 ? "woman" : "women"}` : ""].filter(Boolean).join(", ");
+const ROWS = { front: "Front", row2: "Row 2", row3: "Row 3" };
+const seatText = (seats) => Object.entries(seats || {}).map(([r, s]) => `${ROWS[r] || r}: ${people(s)}`).join(" · ");
+const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || "GET",
+    headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== "/api/driver/login") { signOut(true); throw Object.assign(new Error("signed out"), { status: 401 }); }
+  return { ok: res.ok, status: res.status, data };
+}
+
+// --- sign-in ---
+function showLogin() {
+  $("#app").hidden = true;
+  $("#login").hidden = false;
+}
+function signOut(expired) {
+  token = null;
+  store.del("driver.token");
+  store.del("driver.today");
+  native?.stopTracking?.();
+  showLogin();
+  if (expired) $("#login-error").textContent = "Please sign in again.";
+}
+$("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api("/api/driver/login", { method: "POST", body });
+    if (!r.ok) { $("#login-error").textContent = r.data.error || "Couldn't sign in."; return; }
+    token = r.data.token;
+    store.set("driver.token", token);
+    $("#login-error").textContent = "";
+    start();
+  } catch {
+    $("#login-error").textContent = "No signal. Try again when you have signal.";
+  }
+});
+
+// --- the queue: actions and GPS made without signal ---
+function enqueue(path, body) {
+  queue.push({ path, body: { ...body, key: body.key || newKey() }, at: Date.now() });
+  store.set("driver.queue", queue);
+}
+let flushing = false;
+async function flush() {
+  if (flushing || !queue.length || !token) return;
+  flushing = true;
+  try {
+    while (queue.length) {
+      const item = queue[0];
+      let r;
+      try { r = await api(item.path, { method: "POST", body: item.body }); } catch (e) { if (e.status === 401) return; break; }
+      queue.shift();
+      store.set("driver.queue", queue);
+      if (!r.ok && !r.data.repeated) toast(`Sent after the signal came back, but: ${errText(r.data)}`, 6000);
+    }
+  } finally {
+    flushing = false;
+    showOffline();
+  }
+}
+
+// Do an action now, or queue it when there's no signal (only those that make sense later).
+async function act(path, body = {}, { queueable = true, ok } = {}) {
+  const b = { ...body, key: newKey() };
+  try {
+    const r = await api(path, { method: "POST", body: b });
+    if (!r.ok) { toast(errText(r.data), 5000); return null; }
+    if (ok) toast(ok);
+    await load();
+    return r.data;
+  } catch (e) {
+    if (e.status === 401) return null;
+    if (!queueable) { toast("No signal. Try again when you have signal.", 4000); return null; }
+    enqueue(path, b);
+    toast(`${ok || "Saved"}. It will be sent when the signal comes back.`, 4000);
+    showOffline();
+    return { queued: true };
+  }
+}
+
+// --- loading ---
+async function load() {
+  try {
+    const r = await api("/api/driver/today");
+    if (!r.ok) return;
+    today = r.data;
+    lastOk = Date.now();
+    store.set("driver.today", today);
+    store.set("driver.lastOk", lastOk);
+    alertNewRequests();
+    track();
+  } catch {
+    /* no signal: show what we have */
+  }
+  showOffline();
+  render();
+}
+
+function alertNewRequests() {
+  const fresh = (today.requests || []).filter((r) => !seenRequests.has(r.id));
+  if (fresh.length && today.driver.status === "online") {
+    beep();
+    navigator.vibrate?.([300, 150, 300]);
+  }
+  for (const r of fresh) seenRequests.add(r.id);
+  store.set("driver.seen", [...seenRequests].slice(-200));
+}
+function beep() {
+  try {
+    const a = new (window.AudioContext || window.webkitAudioContext)();
+    const o = a.createOscillator();
+    o.frequency.value = 880;
+    o.connect(a.destination);
+    o.start();
+    o.stop(a.currentTime + 0.35);
+  } catch { /* no sound */ }
+}
+
+function showOffline() {
+  const el = $("#offline");
+  const parts = [];
+  if (lastOk && Date.now() - lastOk > 60000) parts.push(`No signal since ${new Date(lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`);
+  if (queue.length) parts.push(`${queue.length} waiting to send.`);
+  el.textContent = parts.join(" ");
+  el.hidden = !parts.length;
+}
+
+// --- GPS ---
+let watch = null;
+let tracking = null; // what the Android app was last told
+let points = store.get("driver.points", []);
+function track() {
+  const on = today?.driver?.status !== "offline";
+  if (native) {
+    // The app's own service sends GPS and rings for new requests, also with the screen off.
+    const want = on ? `on:${token}` : "off";
+    if (want === tracking) return;
+    tracking = want;
+    if (on) native.startTracking?.(location.origin, token);
+    else native.stopTracking?.();
+    return;
+  }
+  if (on && watch == null && navigator.geolocation) {
+    watch = navigator.geolocation.watchPosition((p) => {
+      points.push({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, speed: p.coords.speed, at: new Date(p.timestamp).toISOString() });
+      if (points.length > 5000) points = points.slice(-5000);
+      store.set("driver.points", points);
+    }, () => {}, { enableHighAccuracy: true, maximumAge: 5000 });
+  } else if (!on && watch != null) {
+    navigator.geolocation.clearWatch(watch);
+    watch = null;
+  }
+}
+async function sendPoints() {
+  if (!points.length || !token) return;
+  const batch = points.slice(0, 500);
+  try {
+    const r = await api("/api/driver/location", { method: "POST", body: { points: batch } });
+    if (r.ok || r.status === 400) {
+      points = points.slice(batch.length);
+      store.set("driver.points", points);
+    }
+  } catch { /* later */ }
+}
+
+// --- screens ---
+function render() {
+  if (!today) { $("#main").innerHTML = '<p class="quiet">Loading…</p>'; return; }
+  const d = today.driver;
+  $("#me").textContent = d.name;
+  const st = $("#status");
+  st.className = `pill ${d.status}`;
+  st.textContent = d.status === "paused" && d.paused_until ? `Paused until ${new Date(d.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : { online: "Online", paused: "Paused", offline: "Offline" }[d.status];
+  $("#status-buttons").innerHTML = `
+    <button class="${d.status === "online" ? "good on" : "ghost"}" data-status="online">Online</button>
+    <button class="${d.status === "paused" ? "on" : "ghost"}" data-status="paused">Pause</button>
+    <button class="${d.status === "offline" ? "bad on" : "ghost"}" data-status="offline">Offline</button>`;
+  const n = (today.requests || []).length;
+  $("#req-count").textContent = n;
+  $("#req-count").hidden = !n;
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
+  const main = $("#main");
+  if (tab === "next") main.innerHTML = nextView();
+  else if (tab === "requests") main.innerHTML = requestsView();
+  else if (tab === "day") main.innerHTML = dayView();
+  else main.innerHTML = moreView();
+}
+
+function seatsBox(rows) {
+  if (!rows) return "";
+  return `<div class="seats">${rows.map((r) => `<div class="seat"><b>${ROWS[r.row] || r.row}</b>${people(r) || "empty"}${r.free ? ` · ${r.free} free` : ""}</div>`).join("")}</div>`;
+}
+function navLink(s) {
+  const q = s.lat != null ? `${s.lat},${s.lng}` : encodeURIComponent(s.address || "");
+  return `google.navigation:q=${q}`;
+}
+function mapsWeb(s) {
+  const q = s.lat != null ? `${s.lat},${s.lng}` : encodeURIComponent(s.address || "");
+  return `https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving`;
+}
+
+function stopCard(s, big) {
+  const pickup = s.kind === "pickup";
+  const late = pickup && s.window && s.arrive > s.window[1];
+  return `<div class="card ${big ? "next" : ""}">
+    <div class="kind ${s.kind}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}${late ? ' <span class="late">late</span>' : ""}</div>
+    <h2>${esc(s.rider_name || "Ride")}</h2>
+    <div class="addr">${esc(s.address)}</div>
+    <div class="quiet">${people(s)}${pickup && s.window ? ` · window ${minuteText(s.window[0])}–${minuteText(s.window[1])}` : ""}${s.together ? " · may sit together" : ""}</div>
+    ${s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
+    ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
+    ${big ? `<div class="quiet" style="margin-top:8px">After this stop:</div>${seatsBox(s.seatsHere)}` : ""}
+    ${big ? `<div class="actions">
+      <a class="wide" href="${native ? navLink(s) : mapsWeb(s)}"><button class="ghost big" style="margin:0">Navigate</button></a>
+      ${s.phone ? `<a href="tel:${esc(s.phone)}"><button class="ghost" style="width:100%">Call</button></a>` : ""}
+      ${pickup ? `<button class="bad" data-act="no_show" data-id="${s.booking_id}">No-show</button>
+        <button class="good big wide" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
+        : `<button class="good big wide" data-act="done" data-id="${s.booking_id}">Dropped off (DONE)</button>`}
+    </div>` : ""}
+  </div>`;
+}
+
+function nextView() {
+  const s = today.next;
+  const head = (today.requests || []).length ? `<div class="card" style="border-color:var(--bad)"><b>${today.requests.length} new request${today.requests.length > 1 ? "s" : ""}</b> <button class="ghost" data-tab-go="requests">Look</button></div>` : "";
+  const lateBtn = `<button class="ghost big" data-late>Running late…</button>`;
+  if (!s) return `${head}<div class="card"><h2>No stops right now</h2><p class="quiet">${today.driver.status === "online" ? "New requests show here and ring the phone." : "Go Online to get ride requests."}</p></div>`;
+  const after = today.route.stops.filter((x) => x.index > s.index && ["accepted", "picked_up"].includes(x.status)).slice(0, 2);
+  return `${head}${stopCard(s, true)}${after.length ? `<h3 class="quiet">Then</h3>${after.map((x) => stopCard(x, false)).join("")}` : ""}${lateBtn}`;
+}
+
+function requestsView() {
+  const list = today.requests || [];
+  if (!list.length) return '<div class="card"><p class="quiet">No requests waiting.</p></div>';
+  return list.map((r) => `<div class="card">
+    <div class="kind">${r.status === "proposed" ? `New time offered: ${minuteText(r.proposed_minute)} (waiting for the caller)` : "Request"}${r.return_of ? " · return trip" : ""}</div>
+    <h2>${esc(r.rider_name || "Ride")}</h2>
+    <div>${esc(r.from)} → ${esc(r.to)}</div>
+    <div class="quiet">${people(r)} · ${minuteText(r.window[0])}–${minuteText(r.window[1])}${r.together ? " · may sit together" : ""}</div>
+    <div class="actions">
+      <button class="big wide" data-preview="${r.id}">See the route with it</button>
+      <button class="bad" data-act="reject" data-id="${r.id}">Reject</button>
+      <button class="ghost" data-propose="${r.id}">Suggest a time</button>
+    </div>
+  </div>`).join("");
+}
+
+function dayView() {
+  const stops = reorder || today.route.stops;
+  if (!stops.length) return '<div class="card"><p class="quiet">No rides on the route today.</p></div>';
+  const editing = !!reorder;
+  return `<div class="card">
+    <div class="quiet">${today.route.driveMinutes ?? 0} minutes of driving${today.route.estimated ? " (some guessed)" : ""}${today.route.manual ? " · your own order" : ""}</div>
+    ${stops.map((s, i) => {
+      const done = !["accepted", "picked_up"].includes(s.status) || (s.kind === "pickup" && s.status === "picked_up");
+      return `<div class="stop ${done ? "done" : ""}">
+        <div class="time">${editing ? "" : minuteText(s.arrive)}</div>
+        <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
+          <b>${esc(s.rider_name)}</b> · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
+        ${editing ? `<div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>` : ""}
+      </div>`;
+    }).join("")}
+  </div>
+  ${editing
+    ? `<div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`
+    : `<div class="actions"><button class="ghost" data-reorder>Change the order</button><button class="ghost" data-auto ${today.route.manual ? "" : "disabled"}>Best order</button></div>`}`;
+}
+
+function moreView() {
+  return `<div class="card"><h2>${esc(today.driver.name)}</h2><p class="quiet">${esc(today.driver.phone)}</p>
+    <button class="ghost big" data-late>Running late…</button>
+    <button class="ghost big" data-refresh>Load again</button>
+    <button class="bad big" data-signout>Sign out</button></div>
+    <p class="quiet">Updated ${lastOk ? new Date(lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never"}.</p>`;
+}
+
+// --- sheets (questions over the page) ---
+function sheet(html) {
+  $("#sheet-body").innerHTML = html;
+  $("#sheet").hidden = false;
+}
+const closeSheet = () => ($("#sheet").hidden = true);
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet" || e.target.dataset.close != null) closeSheet(); });
+
+async function preview(id) {
+  sheet('<p class="quiet">Working out the route…</p>');
+  let r;
+  try { r = await api(`/api/driver/requests/${id}/preview`); } catch { sheet('<p>No signal. Accepting needs signal.</p><button class="ghost big" data-close>Close</button>'); return; }
+  const req = today.requests.find((x) => x.id === id);
+  if (!r.ok) {
+    sheet(`<h2>Can't fit</h2><p>${esc(errText(r.data))}</p><div class="actions"><button class="ghost" data-close>Close</button><button class="ghost" data-propose="${id}">Suggest a time</button><button class="bad wide" data-act="reject" data-id="${id}">Reject</button></div>`);
+    return;
+  }
+  const p = r.data;
+  const shiftRows = Object.entries(p.shifts || {}).map(([bid, k]) => Object.entries(k).map(([kind, [a, b]]) =>
+    `<tr><td>${esc(p.names[bid] || "")}</td><td>${kind === "pickup" ? "pick up" : "drop off"}</td><td>${minuteText(a)}</td><td class="${b > a ? "up" : "down"}">${minuteText(b)}</td></tr>`).join("")).join("");
+  sheet(`<h2>${esc(req?.rider_name || "Ride")}: pick up about ${minuteText(p.eta)}</h2>
+    <p class="quiet">Driving: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes</p>
+    ${shiftRows ? `<p>Times that move:</p><table class="diff"><tbody>${shiftRows}</tbody></table>` : '<p class="quiet">Nobody else\'s time moves.</p>'}
+    <p class="quiet" style="margin-top:12px">The new route:</p>
+    ${p.after.stops.map((s) => `<div class="stop"><div class="time">${minuteText(s.arrive)}</div><div class="body">${s.kind === "pickup" ? "Pick up" : "Drop off"} <b>${esc(p.names[s.booking_id] || "")}</b>${s.booking_id === id ? " (new)" : ""}</div></div>`).join("")}
+    <div class="actions"><button class="bad" data-act="reject" data-id="${id}">Reject</button><button class="ghost" data-propose="${id}">Suggest a time</button>
+    <button class="good big wide" data-act="accept" data-id="${id}">Accept</button><button class="ghost wide" data-close>Close</button></div>`);
+}
+
+function proposeSheet(id) {
+  const r = today.requests.find((x) => x.id === id);
+  const base = r ? r.window[0] : 600;
+  const times = [];
+  for (let m = base - 60; m <= base + 90; m += 15) if (m !== base && m >= 600 && m <= 1080) times.push(m);
+  sheet(`<h2>Suggest a time for ${esc(r?.rider_name || "this ride")}</h2><p class="quiet">The caller is asked to agree.</p>
+    <div class="chips">${times.map((m) => `<button class="ghost" data-propose-at="${m}" data-id="${id}">${minuteText(m)}</button>`).join("")}</div>
+    <button class="ghost big" data-close>Cancel</button>`);
+}
+
+function lateSheet() {
+  sheet(`<h2>Running late by…</h2><p class="quiet">Riders who'd be past their window get a message with the new time.</p>
+    <div class="chips">${[5, 10, 15, 20, 30, 45].map((m) => `<button class="ghost" data-late-by="${m}">${m} min</button>`).join("")}</div>
+    <button class="ghost big" data-close>Cancel</button>`);
+}
+
+function pauseSheet() {
+  sheet(`<h2>Pause for…</h2><p class="quiet">New callers hear the driver isn't available; you come back Online by yourself.</p>
+    <div class="chips">${[15, 30, 60, 120].map((m) => `<button class="ghost" data-pause="${m}">${m < 60 ? `${m} min` : `${m / 60} hour${m > 60 ? "s" : ""}`}</button>`).join("")}</div>
+    <button class="ghost big" data-close>Cancel</button>`);
+}
+
+// Local change right away, so the driver can go on without signal.
+function markLocal(id, status) {
+  if (!today) return;
+  for (const s of today.route.stops) if (s.booking_id === id) s.status = status;
+  today.next = today.route.stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind === "dropoff" && s.status === "picked_up")) || null;
+  store.set("driver.today", today);
+}
+
+// --- clicks ---
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button, [data-tab-go]");
+  if (!t) return;
+  const ds = t.dataset;
+  if (ds.tab || ds.tabGo) { tab = ds.tab || ds.tabGo; reorder = null; render(); return; }
+  if (ds.status) {
+    if (ds.status === "paused") return pauseSheet();
+    if (ds.status === "offline" && !confirm("Go offline? New requests will wait until you're back.")) return;
+    await act("/api/driver/status", { status: ds.status }, { ok: ds.status === "online" ? "You're online" : "You're offline" });
+    return;
+  }
+  if (ds.pause) { closeSheet(); await act("/api/driver/status", { status: "paused", minutes: Number(ds.pause) }, { ok: "Paused" }); return; }
+  if (ds.act) {
+    const id = ds.id;
+    const names = { pickup: "Picked up", done: "Dropped off", no_show: "No-show", accept: "Accepted", reject: "Rejected" };
+    if (ds.act === "no_show" && !confirm("Mark as no-show? The seats are freed.")) return;
+    if (ds.act === "reject" && !confirm("Reject this ride? The caller gets a message.")) return;
+    closeSheet();
+    const queueable = ["pickup", "done", "no_show"].includes(ds.act);
+    if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
+    await act(`/api/driver/bookings/${id}/${ds.act}`, {}, { queueable, ok: names[ds.act] });
+    return;
+  }
+  if (ds.preview) return preview(ds.preview);
+  if (ds.propose) return proposeSheet(ds.propose);
+  if (ds.proposeAt) { closeSheet(); await act(`/api/driver/bookings/${ds.id}/propose`, { minute: Number(ds.proposeAt) }, { queueable: false, ok: "Sent to the caller" }); return; }
+  if (ds.late != null) return lateSheet();
+  if (ds.lateBy) { closeSheet(); await act("/api/driver/late", { minutes: Number(ds.lateBy) }, { ok: "Riders told" }); return; }
+  if (ds.reorder != null) { reorder = today.route.stops.filter((s) => ["accepted", "picked_up"].includes(s.status) && !(s.kind === "pickup" && s.status === "picked_up")).map((s) => ({ ...s })); render(); return; }
+  if (ds.reorderCancel != null) { reorder = null; render(); return; }
+  if (ds.up || ds.down) {
+    const i = Number(ds.up ?? ds.down);
+    const j = ds.up ? i - 1 : i + 1;
+    [reorder[i], reorder[j]] = [reorder[j], reorder[i]];
+    render();
+    return;
+  }
+  if (ds.reorderSave != null) {
+    const r = await act("/api/driver/route/order", { stops: reorder.map((s) => ({ booking_id: s.booking_id, kind: s.kind })) }, { queueable: false, ok: "Order saved" });
+    if (r) reorder = null;
+    const late = r?.route ? Object.keys(r.route.late || {}).length : 0;
+    if (late) toast(`Saved. With this order ${late} pickup${late > 1 ? "s are" : " is"} late.`, 6000);
+    render();
+    return;
+  }
+  if (ds.auto != null) { await act("/api/driver/route/auto", {}, { queueable: false, ok: "Back to the best order" }); return; }
+  if (ds.refresh != null) { await load(); toast("Loaded"); return; }
+  if (ds.signout != null) {
+    if (!confirm("Sign out?")) return;
+    try { await api("/api/driver/logout", { method: "POST", body: {} }); } catch { /* fine */ }
+    signOut(false);
+  }
+});
+
+// --- start ---
+function start() {
+  $("#login").hidden = true;
+  $("#app").hidden = false;
+  render();
+  load();
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+window.addEventListener("online", () => { flush(); load(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { flush(); load(); } });
+setInterval(() => { flush(); load(); }, 15000);
+setInterval(sendPoints, 10000);
+if (token) start();
+else showLogin();

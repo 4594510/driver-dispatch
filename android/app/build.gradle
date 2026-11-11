@@ -1,0 +1,48 @@
+plugins {
+    id "com.android.application"
+}
+
+// The server address is built in from -PserverUrl=https://... (the GitHub build takes it from the repository variable
+// DRIVER_SERVER_URL). Without it the app asks for the address the first time it opens.
+def serverUrl = (project.findProperty("serverUrl") ?: "").toString().trim()
+def code = (project.findProperty("versionCode") ?: "1").toString().toInteger()
+
+android {
+    namespace "org.familyrides.driver"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "org.familyrides.driver"
+        minSdk 26
+        targetSdk 35
+        versionCode code
+        versionName "1.0.${code}"
+        buildConfigField "String", "SERVER_URL", "\"${serverUrl}\""
+    }
+
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv("DRIVER_KEYSTORE_FILE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("DRIVER_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("DRIVER_KEY_ALIAS") ?: "driver"
+                keyPassword System.getenv("DRIVER_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv("DRIVER_KEYSTORE_FILE") ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

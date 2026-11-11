@@ -166,9 +166,9 @@ export function changeStatus(db, id, action, actor, now = new Date(), settings =
   if (!t || !b) return { ok: false, errors: ["not_found"] };
   if (!t.from.includes(b.status)) return { ok: false, errors: ["wrong_status"], status: b.status };
   db.prepare("UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?").run(t.to, nowIso(), id);
-  if (action === "pickup") {
-    db.prepare("UPDATE bookings SET picked_up_minute = ? WHERE id = ?").run(localParts(now, settings.timeZone).minute, id);
-  }
+  const minute = localParts(now, settings.timeZone).minute;
+  if (action === "pickup") db.prepare("UPDATE bookings SET picked_up_minute = ? WHERE id = ?").run(minute, id);
+  if (action === "done") db.prepare("UPDATE bookings SET dropped_off_minute = ?, picked_up_minute = coalesce(picked_up_minute, ?) WHERE id = ?").run(minute, minute, id);
   audit(db, actor, action, id, { from: b.status });
   return { ok: true, booking: getBooking(db, id) };
 }

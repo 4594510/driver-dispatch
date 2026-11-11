@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5fbf">
+  <title>Driver</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="driver.css">
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="card">
+      <h1>Driver sign-in</h1>
+      <label>Your phone number <input name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label>
+      <label>PIN <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required></label>
+      <button type="submit" class="big">Sign in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header>
+      <div class="status-line">
+        <span id="me"></span>
+        <span id="status" class="pill"></span>
+      </div>
+      <div class="status-buttons" id="status-buttons"></div>
+      <div id="offline" class="banner" hidden></div>
+    </header>
+    <nav id="tabs">
+      <button data-tab="next" class="on">Next</button>
+      <button data-tab="requests">Requests <span id="req-count" class="count" hidden></span></button>
+      <button data-tab="day">Day</button>
+      <button data-tab="more">More</button>
+    </nav>
+    <main id="main"></main>
+  </div>
+  <div id="sheet" class="sheet" hidden><div class="sheet-body" id="sheet-body"></div></div>
+  <div id="toast" class="toast" hidden></div>
+  <script src="driver.js"></script>
+</body>
+</html>

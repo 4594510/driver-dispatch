@@ -207,7 +207,36 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
     dropoff_lng: "REAL",
     picked_up_minute: "INTEGER", // when the driver marked the pickup, minutes after midnight
     eta_dropoff_minute: "INTEGER",
+    dropped_off_minute: "INTEGER", // when the driver marked the drop-off
   });
+  // The driver app (stage 5).
+  addColumns(db, "drivers", { pin_hash: "TEXT" }); // the app's sign-in: the driver's phone and a PIN set by an admin
+  addColumns(db, "routes", { manual: "INTEGER NOT NULL DEFAULT 0" }); // the driver set the order by hand: keep it
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS driver_sessions (
+      token_hash TEXT PRIMARY KEY,
+      driver_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    -- GPS points from the app, for live position, arrival times and the driving reports.
+    CREATE TABLE IF NOT EXISTS driver_locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      driver_id TEXT NOT NULL,
+      at TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      accuracy REAL,
+      speed REAL
+    );
+    CREATE INDEX IF NOT EXISTS driver_locations_at ON driver_locations (driver_id, at);
+    -- Actions the app sent with its own key, so one made without signal and sent twice is done once.
+    CREATE TABLE IF NOT EXISTS driver_actions (
+      key TEXT PRIMARY KEY,
+      driver_id TEXT NOT NULL,
+      at TEXT NOT NULL,
+      result TEXT NOT NULL
+    );
+  `);
   return db;
 }
 

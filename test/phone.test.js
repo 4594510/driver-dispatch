@@ -28,7 +28,7 @@ function setup() {
   db.prepare("INSERT INTO phones (number, household_id, passenger_id, notify) VALUES ('+18455550001', 'hh1', 'ps1', 'both')").run();
   db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, lat, lng, spoken) VALUES ('home', 'hh1', '01', 'home', 'Home', '1 Example Ln', 41, -74, 'שטוב')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng, spoken) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd', 51, -74, 'שול')").run();
-  db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
+  db.prepare("INSERT INTO drivers (id, name, phone, status) VALUES ('drv1', 'Driver', '+18455550100', 'online')").run();
   return db;
 }
 const ctx = (db, extra = {}) => ({ db, travel, settings, now, base: "https://dispatch.example", ...extra });
@@ -231,4 +231,11 @@ test("Yiddish Tools WAVs get their real sizes and the shloimy voice", async () =
   assert.equal(out.readUInt32LE(4), 136);
   assert.equal(out.readUInt32LE(40), 100);
   assert.equal(fixWavSizes(Buffer.from("not a wav")).toString(), "not a wav");
+});
+
+test("with the driver offline, the caller hears the ride waits unconfirmed", async () => {
+  const db = setup();
+  db.prepare("UPDATE drivers SET status = 'offline'").run();
+  const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"]);
+  assert.deepEqual(prompts(r[r.length - 1]), ["P22", "P41"]);
 });
