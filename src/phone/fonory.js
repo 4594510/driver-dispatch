@@ -75,6 +75,8 @@ export function readStep(req) {
     direction: b.event === "outbound_answered" || /^out:/.test(step) ? "outbound" : b.direction || "inbound",
     step: step || "start",
     keys: b.digits ?? b.keys ?? "",
+    // A spoken answer (their "collect" with transcribe): what the caller said, as text.
+    ...(b.event === "collect" || b.field_transcript != null || b.transcript != null ? { transcript: String(b.field_transcript ?? b.transcript ?? "") } : {}),
   };
 }
 
@@ -86,7 +88,18 @@ export function toActions(res, base, env = process.env) {
   for (const p of res.play || []) {
     if (p.prompt) actions.push({ action: "play", file: uploaded ? `${p.prompt}.wav` : `${base}/prompts/${p.prompt}.wav` });
     else if (p.audio) actions.push({ action: "play", file: p.audio });
-    else if (p.say) actions.push({ action: "say", text: String(p.say).slice(0, 500), language: "yiddish" });
+    else if (p.say) actions.push({ action: "say", text: String(p.say).slice(0, 500), language: p.language || "yiddish" });
+  }
+  // A spoken answer (a one-time address): their "collect" of the caller's voice, turned into text.
+  if (res.listen && !res.hangup) {
+    actions.push({
+      // Street names are English even when the caller speaks Yiddish; FONORY_TRANSCRIBE_LANGUAGE=auto lets Teltech guess.
+      action: "collect", type: "voice", id: "address", transcribe: true,
+      ...((env.FONORY_TRANSCRIBE_LANGUAGE || "en") !== "auto" ? { transcribe_language: env.FONORY_TRANSCRIBE_LANGUAGE || "en" } : {}),
+      max_duration: res.listen.max_s || 20, silence_timeout: 3, timeout: 10000,
+      action_url: `${base}/fonory/step?step=${encodeURIComponent(res.listen.step)}`,
+    });
+    return { actions };
   }
   if (res.gather && !res.hangup) {
     const g = res.gather;

@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P55) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P59) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -16,8 +16,8 @@ export const PROMPTS = {
   P08: "וויפיל מענער דארפן די רייד? דריקט די צאל.",
   P09: "וויפיל פרויען דארפן די רייד? דריקט די צאל.",
   P10: "מעגן די מענער און פרויען זיצן צוזאמען? יא, דריקט 1. ניין, דריקט 2.",
-  P11: "פון וואו? פון שטוב, דריקט 1. פון אן אנדער פלאץ, דריקט 2.",
-  P12: "וואוהין? אהיים, דריקט 1. צו אן אנדער פלאץ, דריקט 2.",
+  P11: "פון וואו? פון שטוב, דריקט 1. פון אן אנדער פלאץ, דריקט 2. פון אן אדרעס נאר פאר די רייד, דריקט 3.",
+  P12: "וואוהין? אהיים, דריקט 1. צו אן אנדער פלאץ, דריקט 2. צו אן אדרעס נאר פאר די רייד, דריקט 3.",
   P13: "דריקט דעם קאוד פונעם פלאץ, און דערנאך פאונד.",
   P14: "צו הערן די ליסט פון פלעצער, דריקט 0.",
   P15: "ווען? יעצט, דריקט 1. שפעטער היינט, דריקט 2.",
@@ -67,6 +67,11 @@ export const PROMPTS = {
   // Messages sent out (menu key 5): "message number 1, from Monday:" and then the message itself.
   P54: "עס זענען נישטא קיין נייע מעלדונגען.",
   P55: "מעלדונג נאמבער",
+  // A one-time address (menu keys 3 at "from" and "to"): said out loud, read back, not saved.
+  P56: "זאגט די אדרעס: די הויז נומער, די גאס, און די שטאט.",
+  P57: "די אדרעס איז:",
+  P58: "איז דאס ריכטיג? יא, דריקט 1. צו זאגן נאכאמאל, דריקט 2.",
+  P59: "מיר האבן נישט געקענט געפינען די אדרעס.",
 };
 
 // Small words between pieces, recorded once like the numbers.

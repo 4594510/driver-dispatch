@@ -221,3 +221,78 @@ test("the phone line needs Teltech's key, and their address when one is set", ()
   assert.equal(webhookAllowed(req("203.0.113.5", "hook-secret"), { FONORY_WEBHOOK_KEY: "hook-secret" }), true, "no list: key only");
   assert.equal(webhookAllowed(req("178.156.145.236"), { FONORY_ALLOWED_IPS: "178.156.145.236" }), false, "no key set: nothing gets in");
 });
+
+test("Teltech's collect: our listen step becomes a voice collect with a transcript, and the transcript is read back", () => {
+  const out = toActions({ play: [{ prompt: "P56" }], listen: { step: "from_say", max_s: 20 } }, "https://d.example", {});
+  const collect = out.actions.at(-1);
+  assert.equal(collect.action, "collect");
+  assert.equal(collect.type, "voice");
+  assert.equal(collect.transcribe, true);
+  assert.equal(collect.transcribe_language, "en");
+  assert.equal(collect.action_url, "https://d.example/fonory/step?step=from_say");
+  assert.equal(out.actions.some((a) => a.action === "hangup"), false);
+  const step = readStep({ query: { step: "from_say" }, body: { event: "collect", call_id: "c", caller_id: "18455550001", field_id: "address", field_transcript: "12 Main Street Monsey" } });
+  assert.equal(step.transcript, "12 Main Street Monsey");
+  assert.equal(step.step, "from_say");
+  const english = toActions({ play: [{ say: "12 Main Street, Monsey", language: "english" }], hangup: true }, "https://d.example", {});
+  assert.equal(english.actions[0].language, "english");
+});
+
+test("adding a place: the code is optional or 1 digit, and the address is checked on the map", async () => {
+  const lookup = async (a) => /nowhere/i.test(a) ? { status: "not_found" }
+    : /^main st/i.test(a) ? { status: "found", lat: 41.1, lng: -74.05, formatted: "Main St, Monsey, NY 10952, USA", exact: false }
+    : /boston/i.test(a) ? { status: "found", lat: 42.36, lng: -71.06, formatted: "Boston, MA, USA", exact: false, km: 290 }
+    : { status: "found", lat: 41.11, lng: -74.07, formatted: "12 Main St, Monsey, NY 10952, USA", exact: true };
+  await withServer(async (call, db) => {
+    await signIn(call);
+    const hh = (await call("/api/admin/households", "POST", { name: "Family" })).body.id;
+    const a = await call("/api/admin/places", "POST", { householdId: hh, kind: "home", name: "Home", address: "12 Main St Monsey" });
+    assert.equal(a.status, 200);
+    assert.equal(a.body.code, "01", "empty code = the next free one");
+    assert.equal(a.body.found, "12 Main St, Monsey, NY 10952, USA");
+    assert.equal(a.body.warning, null);
+    assert.equal(db.prepare("SELECT lat FROM places WHERE id = ?").get(a.body.id).lat, 41.11, "the map point is kept");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "03");
+    const taken = await call("/api/admin/places", "POST", { householdId: hh, code: "1", name: "X", address: "12 Main St" });
+    assert.equal(taken.status, 400);
+    assert.match(taken.body.error, /already used by Home\. Code 02 is free/);
+    const missing = await call("/api/admin/places", "POST", { householdId: hh, name: "X", address: "Nowhere Road 99" });
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /can't find/);
+    assert.match((await call("/api/admin/places", "POST", { householdId: hh, name: "Street", address: "Main St" })).body.warning, /house number/);
+    assert.match((await call("/api/admin/places", "POST", { householdId: hh, name: "Far", address: "Boston" })).body.warning, /miles from Monsey/);
+    assert.equal((await call(`/api/admin/places/${a.body.id}`, "PATCH", { address: "Nowhere 1" })).status, 400, "an edit is checked too");
+    assert.equal((await call(`/api/admin/places/${a.body.id}`, "PATCH", { address: "14 Main St Monsey" })).status, 200);
+  }, { travel: { geocode: async () => null, ensure: async () => {}, minutes: () => ({ minutes: 10, estimated: false }), lookup } });
+});
+
+test("without a map key a place is saved unchecked", async () => {
+  await withServer(async (call) => {
+    await signIn(call);
+    const r = await call("/api/admin/places", "POST", { name: "Shul", address: "anything" });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.code, "01");
+  });
+});
+
+test("a ride booked from the dashboard with a typed one-time address: checked on the map, not saved as a place", async () => {
+  const travel = {
+    geocode: async () => null, ensure: async () => {}, minutes: () => ({ minutes: 10, estimated: false }),
+    lookup: async (a) => /nowhere/i.test(a) ? { status: "not_found" } : { status: "found", lat: 41.12, lng: -74.06, formatted: a, exact: true },
+  };
+  await withServer(async (call, db) => {
+    await signIn(call);
+    db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
+    db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
+    const ride = { phone: "845-555-0001", men: 1, women: 0, pickup: { address: "Nowhere 9" }, dropoff: { address: "5 Sample Rd" }, pickupMinute: 720, window: 15 };
+    const bad = await call("/api/admin/bookings", "POST", ride);
+    assert.equal(bad.status, 400);
+    assert.match(bad.body.error, /can't find "Nowhere 9"/);
+    const ok = await call("/api/admin/bookings", "POST", { ...ride, pickup: { address: "9 Maple Ave" } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const b = db.prepare("SELECT * FROM bookings").get();
+    assert.equal(b.pickup_address, "9 Maple Ave");
+    assert.equal(b.pickup_lat, 41.12);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM places").get().n, 0);
+  }, { travel, now: () => new Date("2026-11-11T15:00:00Z") });
+});

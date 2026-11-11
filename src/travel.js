@@ -9,6 +9,34 @@ import { localParts } from "./rules.js";
 export const TRAVEL_KEEP_DAYS = 14;
 const MATRIX_URL = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
 const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
+// Prefer matches around Monsey and Spring Valley, so "12 Main St" finds the local street first.
+const AREA_BOUNDS = "41.05,-74.20|41.20,-73.95";
+const AREA_CENTER = { lat: 41.11, lng: -74.07 }; // Monsey
+export const AREA_KM = 40;
+// Google answers that name only an area, not a street or a building.
+const VAGUE_TYPES = ["political", "country", "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3",
+  "locality", "sublocality", "neighborhood", "postal_code", "colloquial_area"];
+
+// Number words as said on the phone ("twelve Main Street", "twenty five", "one hundred three") → digits.
+const ONES = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11,
+  twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+export function spokenNumbers(text) {
+  const words = String(text).split(/(\s+|-)/);
+  const out = [];
+  let n = null;
+  const flush = () => { if (n != null) out.push(String(n)); n = null; };
+  for (const raw of words) {
+    const w = raw.toLowerCase();
+    if (/^(\s+|-)$/.test(raw)) { if (n == null) out.push(raw); continue; }
+    if (w in ONES) n = n != null && n % 10 === 0 && n >= 20 && ONES[w] < 10 ? n + ONES[w] : n != null && n < 10 && n > 0 ? n * 10 + ONES[w] : (flush(), ONES[w]);
+    else if (w in TENS) n = n != null && n > 0 && n < 100 ? n * 100 + TENS[w] : (flush(), TENS[w]);
+    else if (w === "hundred" && n != null) n *= 100;
+    else { if (n != null) { flush(); out.push(" "); } out.push(raw); }
+  }
+  flush();
+  return out.join("").replace(/\s+/g, " ").trim();
+}
 const MAX_SIDE = 25; // 25 x 25 = 625 elements, Google's limit per traffic-aware request
 const UNKNOWN_LEG_MINUTES = 15; // a leg to or from an address with no point at all
 
@@ -82,7 +110,7 @@ export function createTravel(db, opts = {}) {
     if (row) return row.lat == null ? null : { lat: row.lat, lng: row.lng };
     if (!apiKey) return null;
     try {
-      const url = `${GEOCODE_URL}?address=${encodeURIComponent(address)}&region=us&components=country:US&key=${encodeURIComponent(apiKey)}`;
+      const url = geocodeUrl(address);
       const res = await fetchImpl(url);
       const body = await res.json();
       stats.geocodes++;
@@ -99,6 +127,47 @@ export function createTravel(db, opts = {}) {
       log("geocoding failed:", e.message);
       return null;
     }
+  }
+
+  const geocodeUrl = (address) =>
+    `${GEOCODE_URL}?address=${encodeURIComponent(address)}&region=us&bounds=${encodeURIComponent(AREA_BOUNDS)}&components=country:US&key=${encodeURIComponent(apiKey)}`;
+
+  // Check an address someone is saving: { status: "found", lat, lng, formatted, exact, km } | { status: "not_found" } |
+  // { status: "unknown" } (no key, or Google failed). "exact" is false when Google only found the street; km is the
+  // distance from Monsey. An answer that is only a town, county or country counts as not found. An address without
+  // its town that lands far away is tried again in Monsey ("12 Main St" is the one in Monsey, not upstate).
+  async function lookup(address) {
+    const text = spokenNumbers(String(address || "").trim());
+    if (!text) return { status: "not_found" };
+    if (!apiKey) return { status: "unknown" };
+    try {
+      let r = await lookupOnce(text);
+      if (r.status !== "found" || r.km > AREA_KM) {
+        const local = await lookupOnce(`${text}, Monsey, NY`);
+        if (local.status === "found" && local.km <= AREA_KM) r = local;
+      }
+      if (r.status === "found") {
+        const norm = String(address).trim().toLowerCase().replace(/\s+/g, " ");
+        db.prepare("INSERT OR REPLACE INTO geocodes (address, lat, lng, at) VALUES (?, ?, ?, ?)").run(norm, r.lat, r.lng, now().toISOString());
+      }
+      return r;
+    } catch (e) {
+      stats.failures++;
+      log("geocoding failed:", e.message);
+      return { status: "unknown" };
+    }
+  }
+  async function lookupOnce(text) {
+    const body = await (await fetchImpl(geocodeUrl(text))).json();
+    stats.geocodes++;
+    if (body.status === "ZERO_RESULTS") return { status: "not_found" };
+    const r = body.results?.[0];
+    const loc = r?.geometry?.location;
+    if (body.status !== "OK" || !loc) throw new Error(`geocode ${body.status}: ${body.error_message || ""}`);
+    if ((r.types || []).every((t) => VAGUE_TYPES.includes(t))) return { status: "not_found" };
+    const exact = !r.partial_match && ["ROOFTOP", "RANGE_INTERPOLATED"].includes(r.geometry.location_type);
+    const km = Math.round(Math.hypot((loc.lat - AREA_CENTER.lat) * 111, (loc.lng - AREA_CENTER.lng) * 84));
+    return { status: "found", lat: loc.lat, lng: loc.lng, formatted: r.formatted_address || text, exact, km };
   }
 
   // Make sure these legs are in the cache. legs: [{ a, b, minute }] with point keys (null keys are skipped).
@@ -171,5 +240,5 @@ export function createTravel(db, opts = {}) {
     return { minutes: estimateMinutes(a, b), estimated: true };
   }
 
-  return { geocode, ensure, minutes, stats, hasKey: !!apiKey, traffic };
+  return { geocode, lookup, ensure, minutes, stats, hasKey: !!apiKey, traffic };
 }

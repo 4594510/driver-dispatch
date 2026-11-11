@@ -68,7 +68,10 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
         .get(p.placeId, phone.household_id);
       return row ? { id: row.id, address: row.address, lat: row.lat, lng: row.lng } : null;
     }
-    return p.address ? { id: null, address: String(p.address).trim(), lat: null, lng: null } : null;
+    // A one-time address (not saved to the family's places), with its map point when the caller's side found it.
+    const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+    const lat = num(p.lat), lng = num(p.lng);
+    return String(p.address || "").trim() ? { id: null, address: String(p.address).trim(), lat: lat != null && lng != null ? lat : null, lng: lat != null && lng != null ? lng : null } : null;
   };
   const from = place(input.pickup);
   const to = place(input.dropoff);

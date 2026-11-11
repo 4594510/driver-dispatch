@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { openDb, newId, nowIso, audit } from "./db.js";
 import { getBooking } from "./bookings.js";
 import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
-import { createTravel } from "./travel.js";
+import { createTravel, AREA_KM } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
 import { webhookAllowed, fromTeltech, fonoryClient, readStep, toActions } from "./phone/fonory.js";
 import { yiddishVoice } from "./phone/yiddishtools.js";
@@ -282,34 +282,63 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
 
   // --- places (saved addresses, picked by a 2-digit code on the phone) ---
   admin.get("/places", (_req, res) => res.json(db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY household_id IS NOT NULL, code").all()));
-  admin.post("/places", (req, res) => {
-    const { householdId = null, kind = "other" } = req.body;
-    const code = String(req.body.code || "").trim();
+  // Codes a family sees: its own and the shared ones (a shared place sees every code).
+  const usedCodes = (householdId, exceptId = null) => new Map(db
+    .prepare("SELECT code, name FROM places WHERE active = 1 AND id IS NOT ? AND (household_id IS NULL OR ? IS NULL OR household_id = ?)")
+    .all(exceptId, householdId, householdId).map((p) => [p.code, p.name]));
+  const freeCode = (used) => { for (let i = 1; i < 100; i++) { const c = String(i).padStart(2, "0"); if (!used.has(c)) return c; } return null; };
+  // Check an address with Google before saving it, so a typo shows now and not when a ride is booked.
+  const checkAddress = async (address) => {
+    const r = travel.lookup ? await travel.lookup(address) : { status: "unknown" };
+    if (r.status === "not_found") return { error: `Google Maps can't find "${address}". Check the spelling and add the town, for example: 12 Main St, Monsey NY.` };
+    if (r.status !== "found") return { point: null };
+    const km = r.km ?? 0;
+    const warning = km > AREA_KM ? `Google found ${r.formatted}, about ${Math.round(km / 1.6)} miles from Monsey. Check that this is right.`
+      : !r.exact ? `Google only found ${r.formatted}. Add the house number so the driver finds the right door.` : null;
+    return { point: { lat: r.lat, lng: r.lng }, found: r.formatted, warning };
+  };
+  admin.post("/places", async (req, res) => {
+    const householdId = req.body.householdId || null;
+    const kind = req.body.kind || "other";
+    let code = String(req.body.code ?? "").trim();
     const name = String(req.body.name || "").trim();
     const address = String(req.body.address || "").trim();
-    if (!/^\d{2}$/.test(code)) return bad(res, "The code must be 2 digits.");
     if (!name || !address) return bad(res, "Name and address are needed.");
     if (!["home", "work", "other"].includes(kind)) return bad(res, "Kind must be home, work or other.");
-    // A household sees its own codes and the shared ones, so a code may not repeat across those.
-    const taken = db.prepare("SELECT 1 FROM places WHERE active = 1 AND code = ? AND (household_id IS NULL OR ? IS NULL OR household_id = ?)").get(code, householdId, householdId);
-    if (taken) return bad(res, `Code ${code} is already used.`);
+    if (householdId && !db.prepare("SELECT 1 FROM households WHERE id = ?").get(householdId)) return bad(res, "That family isn't there any more.");
+    // The code is what callers press on the phone. Empty = the next free one; "1" = "01".
+    const used = usedCodes(householdId);
+    if (!code) code = freeCode(used);
+    else if (/^\d$/.test(code)) code = `0${code}`;
+    if (!code) return bad(res, "All 99 codes are used.");
+    if (!/^\d{2}$/.test(code)) return bad(res, "The code must be 1 or 2 digits (or leave it empty).");
+    if (used.has(code)) return bad(res, `Code ${code} is already used by ${used.get(code)}. Code ${freeCode(used) || "--"} is free.`);
+    const check = await checkAddress(address);
+    if (check.error) return bad(res, check.error);
     const id = newId("pl");
     const spoken = String(req.body.spoken || "").trim() || null;
-    db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, spoken) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, householdId, code, kind, name, address, spoken);
+    db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, spoken, lat, lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, householdId, code, kind, name, address, spoken, check.point?.lat ?? null, check.point?.lng ?? null);
     audit(db, req.actor, "place_added", null, { id, code, name });
-    res.json({ ok: true, id });
+    res.json({ ok: true, id, code, found: check.found || null, warning: check.warning || null });
   });
-  admin.patch("/places/:id", (req, res) => {
+  admin.patch("/places/:id", async (req, res) => {
     const p = db.prepare("SELECT * FROM places WHERE id = ?").get(req.params.id);
     if (!p) return res.status(404).json({ error: "not_found" });
     const name = String(req.body.name ?? p.name).trim();
     const address = String(req.body.address ?? p.address).trim();
     if (!name || !address) return bad(res, "Name and address are needed.");
+    let point = address === p.address && p.lat != null ? { lat: p.lat, lng: p.lng } : null;
+    let check = {};
+    if (address !== p.address) {
+      check = await checkAddress(address);
+      if (check.error) return bad(res, check.error);
+      point = check.point;
+    }
     if (req.body.spoken != null) db.prepare("UPDATE places SET spoken = ? WHERE id = ?").run(String(req.body.spoken).trim() || null, p.id);
-    db.prepare("UPDATE places SET name = ?, address = ?, lat = CASE WHEN ? = address THEN lat END, lng = CASE WHEN ? = address THEN lng END WHERE id = ?")
-      .run(name, address, address, address, p.id);
+    db.prepare("UPDATE places SET name = ?, address = ?, lat = ?, lng = ? WHERE id = ?").run(name, address, point?.lat ?? null, point?.lng ?? null, p.id);
     audit(db, req.actor, "place_changed", null, { id: p.id });
-    res.json({ ok: true });
+    res.json({ ok: true, found: check.found || null, warning: check.warning || null });
   });
   admin.delete("/places/:id", (req, res) => {
     db.prepare("UPDATE places SET active = 0 WHERE id = ?").run(req.params.id);
@@ -365,7 +394,16 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     }));
   });
   admin.post("/bookings", async (req, res) => {
-    const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db, clock()), req.actor);
+    const input = { ...req.body, phone: normalizePhone(req.body.phone) };
+    // An address typed for this ride only is checked on the map first, like a saved place.
+    for (const end of ["pickup", "dropoff"]) {
+      const e = input[end];
+      if (!e || e.placeId || !String(e.address || "").trim() || e.lat != null) continue;
+      const check = await checkAddress(String(e.address).trim());
+      if (check.error) return bad(res, check.error);
+      input[end] = { address: String(e.address).trim(), ...(check.point || {}) };
+    }
+    const r = await bookRide(db, travel, input, clock(), getSettings(db, clock()), req.actor);
     if (r.ok) for (const b of r.bookings) notify(b, "booked");
     res.status(r.ok ? 200 : 400).json(r);
   });
