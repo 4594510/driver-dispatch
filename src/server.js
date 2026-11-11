@@ -10,7 +10,7 @@ import { getBooking } from "./bookings.js";
 import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
-import { webhookAllowed, fonoryClient, readStep, toActions } from "./phone/fonory.js";
+import { webhookAllowed, fromTeltech, fonoryClient, readStep, toActions } from "./phone/fonory.js";
 import { yiddishVoice } from "./phone/yiddishtools.js";
 import { makeWanted, wantAll } from "./phone/audio.js";
 import { allPieces } from "./phone/words.js";
@@ -68,7 +68,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   fonory.use(express.urlencoded({ extended: false }));
   fonory.use((req, res, next) => {
     if (webhookAllowed(req, env)) return next();
-    console.log(`phone line: refused ${req.method} ${req.path} from ${req.ip}`);
+    const why = !fromTeltech(req, env) ? "not Teltech's address" : req.get("x-fonory-key") || req.query.key ? "wrong key" : "no key";
+    console.log(`phone line: refused ${req.method} ${req.path} from ${req.ip} (${why})`);
     res.status(403).json({ error: "forbidden" });
   });
   fonory.post("/step", async (req, res) => {
