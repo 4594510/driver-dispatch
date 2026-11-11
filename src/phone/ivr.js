@@ -11,6 +11,7 @@ import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
 import { AREA_KM } from "../travel.js";
+import { allPlaces, placeByCode, savePlace, MAX_CODE_DIGITS, SAY_CODE } from "../places.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
 import { peopleForFamily } from "../relations.js";
@@ -18,6 +19,12 @@ import { peopleForFamily } from "../relations.js";
 const ACTIVE = ["pending", "proposed", "accepted", "picked_up"];
 const CANCELLABLE = ["pending", "proposed", "accepted"];
 const TRIES = 2;
+// What "#" means at each question: the usual answer. Questions that book or cancel need a real key.
+const SKIP = {
+  who: "1", with: "0", extra: "2", extra_men: "0", extra_women: "0", men: "0", women: "0", together: "2",
+  from: "1", to: "1", from_keep: "2", to_keep: "2", when: "1", window: "1", ret: "2", reminder_in: "2",
+};
+const CODE_KEYS = MAX_CODE_DIGITS;
 
 const P = (code) => ({ prompt: code });
 
@@ -27,7 +34,11 @@ export async function phoneStep(ctx, body) {
   const callId = String(body.call_id || "");
   const from = normalize(body.from);
   const step = String(body.step || "start");
-  const keys = String(body.keys ?? "").replace(/[^0-9*#]/g, "").replace(/#$/, "");
+  const raw = String(body.keys ?? "").replace(/[^0-9*#]/g, "");
+  // "#" alone skips a question: it takes the usual answer (SKIP). Teltech may also send a bare # as no digits with
+  // terminated_by "#".
+  const skipped = raw === "#" || (raw === "" && body.terminated_by === "#");
+  const keys = skipped && SKIP[step] != null ? SKIP[step] : raw.replace(/#$/, "");
   if (!callId || !from) return { play: [P("P03")], hangup: true };
 
   let call = db.prepare("SELECT * FROM phone_calls WHERE call_id = ?").get(callId);
@@ -38,7 +49,10 @@ export async function phoneStep(ctx, body) {
     call = db.prepare("SELECT * FROM phone_calls WHERE call_id = ?").get(callId);
   }
   const st = JSON.parse(call.state || "{}");
-  const c = { ...ctx, call, st, keys, step, from, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name: (row) => namePiece(db, ctx.base, row) };
+  // A name in English letters (a saved address like "Town Square Mall") is said in English; Yiddish ones in Yiddish.
+  const name = (row) => row && !row.recording && !row.spoken && /[A-Za-z]/.test(row.name) && !/[\u0590-\u05FF]/.test(row.name)
+    ? { say: row.name, language: "english" } : namePiece(db, ctx.base, row);
+  const c = { ...ctx, call, st, keys, step, from, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name };
   const res = call.delivery_id ? await outbound(c) : await inbound(c);
   db.prepare("UPDATE phone_calls SET state = ?, updated_at = ? WHERE call_id = ?").run(JSON.stringify(st), nowIso(), callId);
   return clean(res);
@@ -168,10 +182,9 @@ function rideItems(c, b, i) {
     P(["accepted", "picked_up"].includes(b.status) ? "P30a" : "P30b"),
   ];
 }
+// Every saved address is shared for now (places.js).
 function placesFor(c) {
-  return c.db
-    .prepare("SELECT * FROM places WHERE active = 1 AND (household_id IS NULL OR household_id = ?) ORDER BY length(code), code")
-    .all(c.phone.household_id);
+  return allPlaces(c.db);
 }
 function homeOf(c) {
   return c.db
@@ -351,7 +364,11 @@ const STEPS = {
       settle(c, "menu");
       if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
       c.st.draft = { men: 0, women: 0 };
-      return ask("who", Q.who());
+      return ask("who", [P("P67"), Q.who()]);
+    }
+    if (c.keys === "6") {
+      settle(c, "menu");
+      return listen("add_say", [P("P56")]);
     }
     if (c.keys === "2") return myRides(c);
     if (c.keys === "3") return cancelList(c);
@@ -443,6 +460,10 @@ const STEPS = {
   from_ok: (c) => confirmAddress(c, "from", "to"),
   to_say: (c) => heardAddress(c, "to"),
   to_ok: (c) => confirmAddress(c, "to", "when"),
+  from_keep: (c) => keepAddress(c, "from", "to"),
+  to_keep: (c) => keepAddress(c, "to", "when"),
+  add_say: (c) => heardAddress(c, "add"),
+  add_ok: (c) => confirmAddress(c, "add"),
   to: (c) => pickPlace(c, "to", "when"),
   to_code: (c) => placeCode(c, "to", "when"),
   when(c) {
@@ -514,10 +535,10 @@ const STEPS = {
     return changeRide(c, b);
   },
   async change_code(c) {
-    if (c.keys === "0") return ask("change_code", [placeList(c), P("P13")], 3);
-    const place = placesFor(c).find((p) => p.code === normalCode(c.keys));
+    if (c.keys === "0") return ask("change_code", [placeList(c), P("P13")], CODE_KEYS);
+    const place = /^\d+$/.test(c.keys) ? placeByCode(c.db, c.keys, c.phone.household_id) : null;
     const b = getBooking(c.db, c.st.changing);
-    if (!place) return retry(c, "change_code", Q.change_code(), 3);
+    if (!place) return retry(c, "change_code", Q.change_code(), CODE_KEYS);
     if (!b || !CANCELLABLE.includes(b.status) || !canChangePickup(today(c).minute, b.pickup_minute, c.settings)) return end([P("P36")]);
     c.db.prepare(`UPDATE bookings SET pickup_place_id = ?, pickup_address = ?, pickup_lat = ?, pickup_lng = ?, updated_at = ? WHERE id = ?`)
       .run(place.id, place.address, place.lat, place.lng, nowIso(), b.id);
@@ -545,9 +566,9 @@ function pickPlace(c, which, next) {
   if (c.keys === "1") {
     const home = homeOf(c);
     if (home) return setPlace(c, which, home, next);
-    return ask(`${which}_code`, Q[`${which}_code`](), 3);
+    return ask(`${which}_code`, Q[`${which}_code`](), CODE_KEYS);
   }
-  if (c.keys === "2") return ask(`${which}_code`, Q[`${which}_code`](), 3);
+  if (c.keys === "2") return ask(`${which}_code`, Q[`${which}_code`](), CODE_KEYS);
   if (c.keys === "3") return listen(`${which}_say`, [P("P56")]);
   return retry(c, which, Q[which]());
 }
@@ -559,7 +580,7 @@ async function heardAddress(c, which) {
     c.st.tries ||= {};
     c.st.tries[`${which}_say`] = (c.st.tries[`${which}_say`] || 0) + 1;
     // After two misses, back to choosing a saved place.
-    if (c.st.tries[`${which}_say`] > TRIES) { settle(c, `${which}_say`); return ask(which, [why, Q[which]()]); }
+    if (c.st.tries[`${which}_say`] > TRIES) { settle(c, `${which}_say`); return which === "add" ? ask("menu", [why, MENU]) : ask(which, [why, Q[which]()]); }
     return listen(`${which}_say`, [why, P("P56")]);
   };
   if (!text) return again(P("P43"));
@@ -574,15 +595,37 @@ async function heardAddress(c, which) {
 function confirmAddress(c, which, next) {
   if (c.keys === "2") return listen(`${which}_say`, [P("P56")]);
   if (c.keys !== "1" || !c.st.heard) return retry(c, `${which}_ok`, [P("P58")]);
+  // Just adding an address (menu key 6): save it and say its code.
+  if (which === "add") return ask("menu", [saveHeard(c), MENU]);
+  return ask(`${which}_keep`, [P("P65")]);
+}
+// Save the address for everyone, or use it for this ride only.
+function keepAddress(c, which, next) {
+  if (!c.st.heard || !c.st.draft) return ask("menu", MENU);
+  if (c.keys === "1") {
+    const said = saveHeard(c, (id) => { c.st.draft[which] = id; c.st.draft[`${which}Address`] = null; });
+    return ask(next, [said, Q[next]()]);
+  }
+  if (c.keys !== "2") return retry(c, `${which}_keep`, [P("P65")]);
   c.st.draft[which] = null;
   c.st.draft[`${which}Address`] = c.st.heard;
   c.st.heard = null;
   return ask(next, Q[next]());
 }
+// Save what the caller said as a shared place; its code is the house number when free. Returns what to say.
+function saveHeard(c, use = () => {}) {
+  const h = c.st.heard;
+  const r = savePlace(c.db, { name: spokenAddress(h.address), address: h.address, lat: h.lat, lng: h.lng, kind: "other" }, `phone:${c.from}`);
+  c.st.heard = null;
+  if (!r.ok) return P("P42");
+  use(r.id);
+  return [P("P66"), digitsOf(c, r.code)];
+}
 function placeCode(c, which, next) {
-  if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], 3);
-  const place = placesFor(c).find((p) => p.code === normalCode(c.keys));
-  if (!place) return retry(c, `${which}_code`, Q[`${which}_code`](), 3);
+  if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], CODE_KEYS);
+  if (normalCode(c.keys) === SAY_CODE) return listen(`${which}_say`, [P("P56")]); // 100: say a new address
+  const place = /^\d+$/.test(c.keys) ? placeByCode(c.db, c.keys, c.phone.household_id) : null;
+  if (!place) return retry(c, `${which}_code`, Q[`${which}_code`](), CODE_KEYS);
   return setPlace(c, which, place, next);
 }
 function setPlace(c, which, place, next) {
@@ -607,7 +650,7 @@ function cancelList(c) {
 function changeRide(c, b) {
   if (!canChangePickup(today(c).minute, b.pickup_minute, c.settings)) return end([P("P36")]);
   c.st.changing = b.id;
-  return ask("change_code", Q.change_code(), 3);
+  return ask("change_code", Q.change_code(), CODE_KEYS);
 }
 
 // ---------- outgoing ----------

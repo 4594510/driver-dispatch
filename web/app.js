@@ -258,7 +258,8 @@ async function today() {
   const form = $("#book");
   const fillPlaces = () => {
     const ph = phones.find((p) => p.number === form.phone.value);
-    const mine = shared.filter((p) => !p.household_id || p.household_id === ph?.household_id);
+    // Every saved address is shared for now; the caller's own family's come first.
+    const mine = [...shared].sort((a, b) => (b.household_id === ph?.household_id) - (a.household_id === ph?.household_id));
     for (const end of ["from", "to"]) {
       const was = form[end].options.length ? form[end].value : null; // null on the first fill: start on a saved place
       form[end].innerHTML = `${placeOptions(mine)}<option value="">Another address (this ride only)…</option>`;
@@ -400,7 +401,7 @@ async function families() {
           <label>Messages by <select name="notify"><option value="both">Texts and calls</option><option value="text">Texts only</option><option value="voice">Calls only</option></select></label><button>Add phone</button></form></details>
         <h3>Saved places</h3>
         <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
-        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code on the phone <input name="code" pattern="\\d{1,3}" maxlength="3" placeholder="auto" title="1 to 3 digits, or empty for the next free code"></label>
+        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code on the phone <input name="code" pattern="\\d{1,6}" maxlength="6" placeholder="house number" title="1 to 6 digits. Empty = the house number, or the next free code if another place has it. Codes are shared by everyone."></label>
           <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
           <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></details>
@@ -523,10 +524,10 @@ async function editPlace(id) {
 
 // ---------- shared places ----------
 async function places() {
-  const all = (await api("/api/admin/places")).filter((p) => !p.household_id);
-  main.innerHTML = `<div class="card"><h2>Shared places</h2><p class="quiet">Places every family can use, like shuls and stores. Family homes are under Families.</p>
+  const all = await api("/api/admin/places");
+  main.innerHTML = `<div class="card"><h2>Saved places</h2><p class="quiet">Every saved address, from the dashboard or the phone. Any caller can press its code (100 on the phone = say a new address). A family's home is also under Families.</p>
     <table><tbody>${all.map(placeRow).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>
-    <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,3}" maxlength="3" placeholder="auto" title="1 to 3 digits, or empty for the next free code"></label>
+    <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,6}" maxlength="6" placeholder="house number" title="1 to 6 digits. Empty = the house number, or the next free code if another place has it. Codes are shared by everyone."></label>
       <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
       <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></div>`;
   $("#add-pl").addEventListener("submit", async (e) => {
