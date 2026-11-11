@@ -239,3 +239,17 @@ test("with the driver offline, the caller hears the ride waits unconfirmed", asy
   const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"]);
   assert.deepEqual(prompts(r[r.length - 1]), ["P22", "P41"]);
 });
+
+test("a caller is known by a family's phone or one person's phone; 'for myself' means that person", async () => {
+  const db = setup();
+  db.prepare("INSERT INTO phones (number, household_id, passenger_id, notify) VALUES ('+18455550002', 'hh1', NULL, 'both')").run();
+  // 1 order, 1 for myself, 1 man, 0 women, 1 from home, 2 other place, code 20, 2 later, 1200, 1 = 15 min, 2 no return, 1 correct.
+  const keys = ["1", "1", "1", "0", "1", "2", "20", "2", "1200", "1", "2", "1"];
+  await call(db, keys, { from: "8455550001", id: "me1" });
+  await call(db, keys.map((k) => (k === "1200" ? "1230" : k)), { from: "845-555-0002", id: "me2" });
+  const rows = db.prepare("SELECT booked_by_phone, household_id, passenger_id FROM bookings ORDER BY pickup_minute").all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1" },
+    { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null },
+  ]);
+});

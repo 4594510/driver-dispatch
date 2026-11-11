@@ -184,7 +184,7 @@ function driverLine(d) {
 
 async function today() {
   const [rows, fams, route, drivers] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/households"), api("/api/admin/route"), api("/api/admin/drivers")]);
-  const phones = fams.flatMap((h) => h.phones.map((p) => ({ ...p, family: h.name, places: h.places })));
+  const phones = fams.flatMap((h) => h.phones.map((p) => ({ ...p, family: h.name, person: h.passengers.find((x) => x.id === p.passenger_id)?.name, places: h.places })));
   const shared = await api("/api/admin/places");
   main.innerHTML = `
     <div class="card"><h2>Today's route <button id="recalc" class="ghost">Recalculate</button></h2>
@@ -193,7 +193,7 @@ async function today() {
     <div class="card"><h2>Book a ride for a caller</h2>
       <form id="book">
         <div class="row">
-          <label>Caller's phone <select name="phone" required>${phones.map((p) => `<option value="${esc(p.number)}">${esc(p.family)}: ${esc(p.number)}</option>`).join("")}</select></label>
+          <label>Caller's phone <select name="phone" required>${phones.map((p) => `<option value="${esc(p.number)}">${esc(p.family)}${p.person ? ` (${esc(p.person)})` : ""}: ${esc(phoneText(p.number))}</option>`).join("")}</select></label>
           <label>Rider's name <input name="riderName"></label>
         </div>
         <div class="row">
@@ -262,44 +262,92 @@ async function pending() {
 }
 
 // ---------- families ----------
+// Which families are open and what the search says, kept across reloads of the tab.
+const famState = { open: new Set(), q: "" };
+try { famState.open = new Set(JSON.parse(localStorage.getItem("dd.famOpen") || "[]")); famState.q = sessionStorage.getItem("dd.famQ") || ""; } catch {}
+const saveFamState = () => { try { localStorage.setItem("dd.famOpen", JSON.stringify([...famState.open])); sessionStorage.setItem("dd.famQ", famState.q); } catch {} };
+// A phone is the whole family's, or one person's.
+const ownerOptions = (h, chosen) => `<option value="">Whole family</option>${h.passengers.map((p) => `<option value="${esc(p.id)}" ${p.id === chosen ? "selected" : ""}>${esc(p.name)}</option>`).join("")}`;
+// +18455551234 shown as 845-555-1234.
+const phoneText = (n) => String(n).replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3");
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// Everything a search can match in a family: its name, people, phones (digits too) and places.
+const famText = (h) => [h.name, ...h.passengers.flatMap((p) => [p.name, p.spoken, p.notes]), ...h.phones.flatMap((p) => [p.number, phoneText(p.number)]),
+  ...h.places.flatMap((p) => [p.code, p.name, p.spoken, p.address])].join(" ").toLowerCase();
+
 async function families() {
   const [fams, prios] = await Promise.all([api("/api/admin/households"), api("/api/admin/priorities")]);
+  fams.sort((a, b) => a.name.localeCompare(b.name));
   main.innerHTML = `
-    <div class="card"><h2>Add a family</h2><form id="add-fam" class="row"><label>Family name <input name="name" required></label><button>Add</button></form></div>
-    ${fams.map((h) => `
-      <div class="card" data-hh="${esc(h.id)}">
-        <div class="row" style="justify-content:space-between"><h2>${esc(h.name)}</h2>
-          <span><button class="ghost" data-act="rename">Rename</button> <button class="danger" data-act="remove-fam">Remove family</button></span></div>
+    <div class="card toolbar">
+      <input id="fam-q" type="search" placeholder="Search families, people, phones, places…" value="${esc(famState.q)}" autocomplete="off">
+      <button class="ghost" id="fam-expand">Open all</button><button class="ghost" id="fam-collapse">Close all</button>
+      <details class="add"><summary>+ Add a family</summary><form id="add-fam" class="row"><label>Family name <input name="name" required></label><button>Add</button></form></details>
+    </div>
+    <p class="quiet" id="fam-count"></p>
+    ${fams.map((h) => {
+      const hp = prios.filter((x) => x.household_id === h.id);
+      const top = hp.reduce((m, x) => Math.max(m, x.level), 0);
+      return `
+      <details class="card fam" data-hh="${esc(h.id)}" data-text="${esc(famText(h))}" ${famState.open.has(h.id) ? "open" : ""}>
+        <summary><span class="fam-name">${esc(h.name)}</span>${top ? ` <span class="prio p${top}">${esc(PRIO_LEVELS[top])}</span>` : ""}
+          <span class="quiet">${plural(h.passengers.length, "person", "people")} · ${plural(h.phones.length, "phone", "phones")} · ${plural(h.places.length, "place", "places")}</span></summary>
+        <div class="fam-body">
+        <div class="row fam-tools"><button class="ghost" data-act="rename">Rename</button> <button class="danger" data-act="remove-fam">Remove family</button></div>
         <h3>People</h3>
         <table><tbody>${h.passengers.map((p) => `<tr data-ps="${esc(p.id)}"><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${p.gender === "m" ? "Man" : "Woman"}</td><td class="quiet">${esc(p.notes)}</td>
           <td class="actions"><button class="ghost" data-act="edit-ps">Edit</button><button class="danger" data-act="remove-ps">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">No one yet.</td></tr>'}</tbody></table>
-        <form class="row" data-form="ps"><label>Name <input name="name" required></label>
+        <details class="add"><summary>+ Add a person</summary><form class="row" data-form="ps"><label>Name <input name="name" required></label>
           <label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Man or woman <select name="gender"><option value="m">Man</option><option value="f">Woman</option></select></label>
-          <label>Notes for the driver <input name="notes"></label><button>Add person</button></form>
+          <label>Notes for the driver <input name="notes"></label><button>Add person</button></form></details>
+        <h3>Approved phones</h3>
+        <table><tbody>${h.phones.map((p) => `<tr data-ph="${esc(p.number)}"><td>${esc(phoneText(p.number))}</td>
+          <td><select data-act="owner" title="Whose phone: on a person's phone, 'for myself' books that person">${ownerOptions(h, p.passenger_id)}</select></td>
+          <td><select data-act="notify">${["both", "text", "voice"].map((n) => `<option value="${n}" ${p.notify === n ? "selected" : ""}>${n === "both" ? "Texts and calls" : n === "text" ? "Texts only" : "Calls only"}</option>`).join("")}</select></td>
+          <td class="actions"><button class="danger" data-act="remove-ph">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">No phones yet.</td></tr>'}</tbody></table>
+        <details class="add"><summary>+ Add a phone</summary><form class="row" data-form="ph"><label>Phone number <input name="number" required placeholder="845-555-1234"></label>
+          <label>Whose phone <select name="passengerId">${ownerOptions(h, null)}</select></label>
+          <label>Messages by <select name="notify"><option value="both">Texts and calls</option><option value="text">Texts only</option><option value="voice">Calls only</option></select></label><button>Add phone</button></form></details>
+        <h3>Saved places</h3>
+        <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
+        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2" placeholder="01"></label>
+          <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
+          <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
+          <label>Address <input name="address" required></label><button>Add place</button></form></details>
         <h3>Priority</h3>
-        <p class="quiet">Higher priority goes first when rides compete for the same seats or time. It never moves a ride the driver already accepted.</p>
-        <table><tbody>${prios.filter((x) => x.household_id === h.id).map((x) => `<tr data-pri="${esc(x.id)}"><td>${esc(x.passenger_name || "Whole family")}</td>
+        <table><tbody>${hp.map((x) => `<tr data-pri="${esc(x.id)}"><td>${esc(x.passenger_name || "Whole family")}</td>
           <td><span class="prio p${x.level}">${esc(x.label)}</span></td><td>${esc(whenText(x))}</td><td class="quiet">${esc(x.note)}</td>
           <td class="actions"><button class="danger" data-act="remove-pri">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">Normal priority.</td></tr>'}</tbody></table>
+        <details class="add"><summary>+ Add a priority</summary>
+        <p class="quiet">Higher priority goes first when rides compete for the same seats or time. It never moves a ride the driver already accepted.</p>
         <form class="row" data-form="pri"><label>Who <select name="passengerId"><option value="">Whole family</option>${h.passengers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label>
           <label>Level <select name="level">${Object.entries(PRIO_LEVELS).map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select></label>
           <label>From (empty = now) <input name="from" type="datetime-local"></label>
           <label>Until (empty = always) <input name="to" type="datetime-local"></label>
-          <label>Note (optional) <input name="note" placeholder="for example: doctor visits"></label><button>Add priority</button></form>
-        <h3>Approved phones</h3>
-        <table><tbody>${h.phones.map((p) => `<tr data-ph="${esc(p.number)}"><td>${esc(p.number)}</td>
-          <td><select data-act="notify">${["both", "text", "voice"].map((n) => `<option value="${n}" ${p.notify === n ? "selected" : ""}>${n === "both" ? "Texts and calls" : n === "text" ? "Texts only" : "Calls only"}</option>`).join("")}</select></td>
-          <td class="actions"><button class="danger" data-act="remove-ph">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">No phones yet.</td></tr>'}</tbody></table>
-        <form class="row" data-form="ph"><label>Phone number <input name="number" required placeholder="845-555-1234"></label>
-          <label>Messages by <select name="notify"><option value="both">Texts and calls</option><option value="text">Texts only</option><option value="voice">Calls only</option></select></label><button>Add phone</button></form>
-        <h3>Saved places</h3>
-        <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
-        <form class="row" data-form="pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2" placeholder="01"></label>
-          <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
-          <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
-          <label>Address <input name="address" required></label><button>Add place</button></form>
-      </div>`).join("")}`;
+          <label>Note (optional) <input name="note" placeholder="for example: doctor visits"></label><button>Add priority</button></form></details>
+        </div>
+      </details>`;
+    }).join("") || '<p class="quiet">No families yet.</p>'}`;
+
+  const cards = [...main.querySelectorAll("details.fam")];
+  const filter = () => {
+    const words = famState.q.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const c of cards) { const hit = words.every((w) => c.dataset.text.includes(w)); c.hidden = !hit; if (hit) shown++; }
+    $("#fam-count").textContent = words.length ? `${shown} of ${plural(cards.length, "family", "families")} match` : plural(cards.length, "family", "families");
+  };
+  filter();
+  $("#fam-q").addEventListener("input", (e) => { famState.q = e.target.value; saveFamState(); filter(); });
+  $("#fam-q").addEventListener("keydown", (e) => {
+    // Enter opens the only match; Escape clears the search.
+    if (e.key === "Escape") { e.target.value = ""; famState.q = ""; saveFamState(); filter(); }
+    if (e.key === "Enter") { const vis = cards.filter((c) => !c.hidden); if (vis.length === 1) vis[0].open = true; }
+  });
+  for (const c of cards) c.addEventListener("toggle", () => { famState.open[c.open ? "add" : "delete"](c.dataset.hh); saveFamState(); });
+  const setAll = (o) => { for (const c of cards) if (!c.hidden) c.open = o; };
+  $("#fam-expand").addEventListener("click", () => setAll(true));
+  $("#fam-collapse").addEventListener("click", () => setAll(false));
 
   $("#add-fam").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -315,13 +363,15 @@ async function families() {
     if (await act(() => api(`/api/admin/${path}`, { method: "POST", body: { ...f, householdId: hh } }), "Added")) open("families");
   });
   main.addEventListener("change", async (e) => {
-    if (e.target.dataset.act !== "notify") return;
+    const a = e.target.dataset.act;
+    if (a !== "notify" && a !== "owner") return;
     const number = e.target.closest("[data-ph]").dataset.ph;
-    await act(() => api(`/api/admin/phones/${encodeURIComponent(number)}`, { method: "PATCH", body: { notify: e.target.value } }), "Saved");
+    const body = a === "notify" ? { notify: e.target.value } : { passengerId: e.target.value };
+    await act(() => api(`/api/admin/phones/${encodeURIComponent(number)}`, { method: "PATCH", body }), "Saved");
   });
   main.addEventListener("click", async (e) => {
     const a = e.target.dataset.act;
-    if (!a || a === "notify") return;
+    if (!a || a === "notify" || a === "owner") return;
     const hh = e.target.closest("[data-hh]")?.dataset.hh;
     const ps = e.target.closest("[data-ps]")?.dataset.ps;
     const ph = e.target.closest("[data-ph]")?.dataset.ph;
