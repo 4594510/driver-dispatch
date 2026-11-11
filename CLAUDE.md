@@ -46,4 +46,6 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/settings.js: hours, areas, trip limit stored in the database.
 - src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
   and miles from GPS) and announcements (deliveries queued until the phone line is connected).
+- src/feedback.js: comments, complaints, suggestions and requests from the dashboard and driver app; Claude reads
+  and answers them at /api/feedback (scripts/feedback.mjs). docs/feedback-check.md: how the regular check works.
 - web/: the admin dashboard (plain JS, one page).

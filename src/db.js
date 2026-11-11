@@ -236,6 +236,18 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       at TEXT NOT NULL,
       result TEXT NOT NULL
     );
+    -- Comments, complaints, suggestions and requests from the dashboard and the driver app (feedback.js).
+    CREATE TABLE IF NOT EXISTS feedback (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,                      -- admin | driver
+      author TEXT NOT NULL,                      -- the admin's email or the driver's id
+      kind TEXT NOT NULL,                        -- comment | complaint | suggestion | request
+      text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',        -- new | working | needs_you | done | declined
+      reply TEXT,                                -- what was done, or what is needed
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
 }

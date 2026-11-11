@@ -23,6 +23,7 @@ import { localParts } from "./rules.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { driverRouter, setPin, driverNow } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
+import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PHONE = /^\+1\d{10}$/;
@@ -91,6 +92,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   // --- the driver app ---
   const rideCtx = () => ({ db, travel, settings: getSettings(db), now: clock(), notify });
   app.use("/api/driver", driverRouter(db, rideCtx));
+  // Claude's reading of feedback, with FEEDBACK_KEY (feedback.js).
+  app.use("/api/feedback", feedbackRouter(db, env));
 
   // --- sign-in ---
   app.post("/api/login", (req, res) => {
@@ -405,6 +408,17 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     fs.writeFileSync(path.join(recordingsDir, name), req.body);
     audit(db, req.actor, "recording_uploaded", null, { name });
     res.json({ ok: true, recording: name });
+  });
+
+  // --- feedback (comments, complaints, suggestions, requests) ---
+  admin.get("/feedback", (_req, res) => res.json(listFeedback(db)));
+  admin.post("/feedback", (req, res) => {
+    const r = addFeedback(db, req.body, "admin", req.admin);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.patch("/feedback/:id", (req, res) => {
+    const r = updateFeedback(db, req.params.id, req.body, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
   });
 
   app.use("/api/admin", admin);

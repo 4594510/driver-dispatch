@@ -12,6 +12,7 @@ import { getBooking } from "./bookings.js";
 import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./dispatch.js";
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
+import { addFeedback, listFeedback } from "./feedback.js";
 
 const SESSION_DAYS = 90;
 const STATUSES = ["online", "offline", "paused"];
@@ -170,6 +171,10 @@ export function driverRouter(db, ctxFor) {
     const day = localParts(c.now, c.settings.timeZone).day;
     return autoRoute(db, c.travel, day, c.settings, c.now);
   }));
+
+  // Comments, complaints, suggestions and requests: the driver's own, with the answers.
+  r.get("/feedback", (req, res) => res.json(listFeedback(db, { source: "driver", author: req.driverId, limit: 50 })));
+  r.post("/feedback", once(async (req) => addFeedback(db, req.body, "driver", req.driverId)));
 
   return r;
 }
