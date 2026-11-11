@@ -12,6 +12,8 @@ import { getBooking } from "./bookings.js";
 import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./dispatch.js";
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
+import { getSettings } from "./settings.js";
+import { scheduleView, addChange, removeChange } from "./schedule.js";
 
 const SESSION_DAYS = 90;
 const STATUSES = ["online", "offline", "paused"];
@@ -102,8 +104,13 @@ export function driverRouter(db, ctxFor) {
     const c = ctxFor();
     const d = driverNow(db, req.driverId, c.now);
     const here = localParts(c.now, c.settings.timeZone);
-    res.json({ driver: publicDriver(d), ...todayFor(db, here) });
+    res.json({ driver: publicDriver(d), ...todayFor(db, here), hours: hoursOf(c.settings) });
   });
+
+  // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).
+  r.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), ctxFor().now)));
+  r.post("/schedule", once(async (req) => addChange(db, req.body, req.actor, getSettings(db), ctxFor().now)));
+  r.post("/schedule/:id/remove", once(async (req) => removeChange(db, req.params.id, req.actor)));
 
   r.post("/status", once(async (req) => {
     const c = ctxFor();
@@ -173,6 +180,9 @@ export function driverRouter(db, ctxFor) {
 
   return r;
 }
+
+// Today's hours, for the app (the times it offers when suggesting a new time).
+const hoursOf = (s) => ({ openMinute: s.openMinute, closeMinute: s.closeMinute, closed: !!s.closed, changed: !!s.scheduleChanged });
 
 function namesFor(db, p) {
   const ids = new Set([...(p.before?.stops || []), ...(p.after?.stops || [])].map((s) => s.booking_id));

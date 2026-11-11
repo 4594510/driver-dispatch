@@ -6,9 +6,10 @@ import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
 import { keypadTime, localParts, canChangePickup } from "../rules.js";
-import { W, numberWords, timePieces } from "./words.js";
+import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
+import { upcomingChanges } from "../schedule.js";
 
 const ACTIVE = ["pending", "proposed", "accepted", "picked_up"];
 const CANCELLABLE = ["pending", "proposed", "accepted"];
@@ -56,6 +57,13 @@ function retry(c, step, question, maxKeys = 1) {
   if (c.st.tries[step] > TRIES) return end([]);
   return ask(step, [P(c.keys ? "P42" : "P43"), question], maxKeys);
 }
+// The same, when the answer was a real one that doesn't fit (a time outside today's hours): say why instead.
+function retryBecause(c, step, why, question, maxKeys = 1) {
+  c.st.tries ||= {};
+  c.st.tries[step] = (c.st.tries[step] || 0) + 1;
+  if (c.st.tries[step] > TRIES) return end([why]);
+  return ask(step, [why, question], maxKeys);
+}
 const settle = (c, step) => {
   if (c.st.tries) delete c.st.tries[step];
 };
@@ -74,6 +82,32 @@ function riderPiece(c, b) {
 }
 function peopleOf(c, men, women) {
   return [men ? [numberOf(c, men), c.say(men === 1 ? W.man : W.men)] : null, men && women ? c.say(W.and) : null, women ? [numberOf(c, women), c.say(women === 1 ? W.woman : W.women)] : null];
+}
+
+// ---------- the schedule ----------
+// Today's hours (c.settings holds today's, from getSettings(db, now)): "today there are rides from 10 to 6", or "today
+// there are no rides".
+function hoursToday(c) {
+  if (c.settings.closed) return [P("P49")];
+  return [P("P48"), timeOf(c, c.settings.openMinute), c.say(W.until), timeOf(c, c.settings.closeMinute)];
+}
+const usualOpen = (c) => c.settings.usualOpenMinute ?? c.settings.openMinute;
+const usualClose = (c) => c.settings.usualCloseMinute ?? c.settings.closeMinute;
+const fitsToday = (c, m) => !c.settings.closed && m >= c.settings.openMinute && m <= c.settings.closeMinute;
+// Menu key 4: today, the usual hours, and the changes in the next two weeks.
+function scheduleSpeech(c) {
+  const usual = { ...c.settings, openMinute: usualOpen(c), closeMinute: usualClose(c) };
+  const changes = upcomingChanges(c.db, usual, c.now);
+  const day = (d) => dayPieces(d, today(c).day).map((t) => c.say(t));
+  return [
+    hoursToday(c),
+    [P("P50"), timeOf(c, usual.openMinute), c.say(W.until), timeOf(c, usual.closeMinute)],
+    changes.length ? P("P51") : null,
+    changes.map((g) => [
+      g.from === g.to ? day(g.from) : [c.say(W.from), day(g.from), c.say(W.until), day(g.to)],
+      g.closed ? P("P53") : [P("P52"), timeOf(c, g.openMinute), c.say(W.until), timeOf(c, g.closeMinute)],
+    ]),
+  ];
 }
 
 // ---------- incoming ----------
@@ -161,9 +195,16 @@ function readBack(c) {
 }
 
 const REFUSALS = {
-  no_seats: "P23", no_time: "P23", too_far: "P26", outside_hours: "P24", in_past: "P24", not_today: "P24",
-  return_outside_hours: "P24", return_before_pickup: "P24", not_registered: "P02",
+  no_seats: "P23", no_time: "P23", too_far: "P26", in_past: "P24", not_today: "P24", return_before_pickup: "P24",
+  not_registered: "P02",
 };
+// Refusals about the hours say today's hours.
+const HOURS_REFUSALS = ["closed", "outside_hours", "return_outside_hours"];
+function refusalOf(c, code) {
+  if (HOURS_REFUSALS.includes(code)) return hoursToday(c);
+  if (code === "in_past" || code === "not_today") return [P("P24"), hoursToday(c)];
+  return P(REFUSALS[code] || "P42");
+}
 
 async function book(c) {
   const d = c.st.draft;
@@ -178,7 +219,7 @@ async function book(c) {
     for (const b of r.bookings) c.notify?.(b, "booked");
     return end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]);
   }
-  const refusal = P(REFUSALS[r.errors[0]] || "P42");
+  const refusal = refusalOf(c, r.errors[0]);
   if (r.suggestions?.length) {
     c.st.offer = r.suggestions[0];
     return ask("offer", [refusal, P("P27"), timeOf(c, c.st.offer), P("P27b")]);
@@ -197,7 +238,8 @@ const STEPS = {
       c.st.reminder = waiting.booking_id;
       return ask("reminder_in", [P("P01"), P("P05")]);
     }
-    return ask("menu", [P("P01"), MENU]);
+    // A schedule change today: say it right away (no rides today, or today's other hours).
+    return ask("menu", [P("P01"), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
   },
   reminder_in(c) {
     if (c.keys === "1" && c.st.reminder) {
@@ -210,11 +252,16 @@ const STEPS = {
   menu(c) {
     if (c.keys === "1") {
       settle(c, "menu");
+      if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
       c.st.draft = { men: 0, women: 0 };
       return ask("who", Q.who());
     }
     if (c.keys === "2") return myRides(c);
     if (c.keys === "3") return cancelList(c);
+    if (c.keys === "4") {
+      settle(c, "menu");
+      return ask("menu", [scheduleSpeech(c), MENU]);
+    }
     if (c.keys === "9") return ask("menu", MENU);
     return retry(c, "menu", MENU);
   },
@@ -258,6 +305,7 @@ const STEPS = {
   to_code: (c) => placeCode(c, "to", "when"),
   when(c) {
     if (c.keys === "1") {
+      if (!fitsToday(c, today(c).minute)) return end([hoursToday(c)]);
       c.st.draft.pickupMinute = null;
       return ask("window", Q.window());
     }
@@ -265,8 +313,9 @@ const STEPS = {
     return retry(c, "when", Q.when());
   },
   time(c) {
-    const m = keypadTime(c.keys);
+    const m = keypadTime(c.keys, c.settings);
     if (m == null) return retry(c, "time", Q.time(), 4);
+    if (!fitsToday(c, m)) return retryBecause(c, "time", hoursToday(c), Q.time(), 4);
     c.st.draft.pickupMinute = m;
     return ask("window", Q.window());
   },
@@ -284,8 +333,9 @@ const STEPS = {
     return retry(c, "ret", Q.ret());
   },
   ret_time(c) {
-    const m = keypadTime(c.keys);
+    const m = keypadTime(c.keys, c.settings);
     if (m == null) return retry(c, "ret_time", Q.ret_time(), 4);
+    if (!fitsToday(c, m)) return retryBecause(c, "ret_time", hoursToday(c), Q.ret_time(), 4);
     c.st.draft.returnMinute = m;
     return ask("confirm", readBack(c));
   },

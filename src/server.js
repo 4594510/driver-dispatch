@@ -17,6 +17,7 @@ import { allPieces } from "./phone/words.js";
 import { notifyBooking, queueReminders, sendDue, callEnded } from "./notify.js";
 import * as auth from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
+import { scheduleView, addChange, removeChange } from "./schedule.js";
 import { report } from "./reports.js";
 import { createAnnouncement, listAnnouncements } from "./announcements.js";
 import { localParts } from "./rules.js";
@@ -66,7 +67,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   fonory.use((req, res, next) => (webhookAllowed(req, env) ? next() : res.status(403).json({ error: "forbidden" })));
   fonory.post("/step", async (req, res) => {
     try {
-      res.json(await phoneStep({ db, travel, settings: getSettings(db), now: clock(), base: baseUrl(req), notify }, req.body || {}));
+      res.json(await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base: baseUrl(req), notify }, req.body || {}));
     } catch (e) {
       console.error("phone step failed:", e);
       res.json({ play: [{ prompt: "P03" }], hangup: true });
@@ -89,7 +90,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   app.use("/admin", express.static(path.join(here, "..", "web")));
 
   // --- the driver app ---
-  const rideCtx = () => ({ db, travel, settings: getSettings(db), now: clock(), notify });
+  const rideCtx = () => ({ db, travel, settings: getSettings(db, clock()), now: clock(), notify });
   app.use("/api/driver", driverRouter(db, rideCtx));
 
   // --- sign-in ---
@@ -327,7 +328,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     res.json(rows);
   });
   admin.post("/bookings", async (req, res) => {
-    const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db), req.actor);
+    const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db, clock()), req.actor);
     if (r.ok) for (const b of r.bookings) notify(b, "booked");
     res.status(r.ok ? 200 : 400).json(r);
   });
@@ -337,11 +338,11 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   admin.post("/route/refresh", async (req, res) => {
     const day = req.body.day || localParts(clock(), getSettings(db).timeZone).day;
-    const r = await refreshDay(db, travel, day, getSettings(db), clock());
+    const r = await refreshDay(db, travel, day, getSettings(db, clock()), clock());
     res.json({ ...r, route: dayRoute(db, day) });
   });
   admin.get("/bookings/:id/preview", async (req, res) => {
-    const r = await previewAccept(db, travel, req.params.id, getSettings(db), clock());
+    const r = await previewAccept(db, travel, req.params.id, getSettings(db, clock()), clock());
     res.status(r.ok ? 200 : 400).json(r);
   });
   admin.patch("/bookings/:id", async (req, res) => {
@@ -357,7 +358,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
       dropoff_lat = CASE WHEN dropoff_address = ? THEN dropoff_lat END, dropoff_lng = CASE WHEN dropoff_address = ? THEN dropoff_lng END
       WHERE id = ?`).run(pickup, dropoff, nowIso(), pickup, pickup, dropoff, dropoff, b.id);
     audit(db, req.actor, "booking_changed", b.id, { pickup_address: pickup, dropoff_address: dropoff });
-    const r = b.status === "accepted" ? await refreshDay(db, travel, b.day, getSettings(db), clock()) : null;
+    const r = b.status === "accepted" ? await refreshDay(db, travel, b.day, getSettings(db, clock()), clock()) : null;
     const late = r?.route && (r.route.late[b.id] || Object.keys(r.route.late).length || Object.keys(r.route.over).length);
     res.json({ ok: true, booking: getBooking(db, b.id), warning: late ? "With the new address some pickups can't be on time. Check today's route." : null });
   });
@@ -383,6 +384,16 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   admin.get("/settings", (_req, res) => res.json(getSettings(db)));
   admin.put("/settings", (req, res) => {
     const r = updateSettings(db, req.body, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  // --- schedule changes: other hours, or no rides, for a day or a range (the driver app has the same) ---
+  admin.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), clock())));
+  admin.post("/schedule", (req, res) => {
+    const r = addChange(db, req.body, req.actor, getSettings(db), clock());
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.delete("/schedule/:id", (req, res) => {
+    const r = removeChange(db, req.params.id, req.actor);
     r.ok ? res.json(r) : bad(res, r.error);
   });
   admin.get("/reports", (req, res) => {

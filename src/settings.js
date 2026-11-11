@@ -1,7 +1,8 @@
 // Service settings the admin can change (spec section 13: service hours and areas), stored in the settings table
 // over the defaults in rules.js.
-import { DEFAULT_SETTINGS } from "./rules.js";
+import { DEFAULT_SETTINGS, localParts } from "./rules.js";
 import { audit } from "./db.js";
+import { withDay } from "./schedule.js";
 
 const EDITABLE = {
   openMinute: (v) => Number.isInteger(v) && v >= 0 && v < 24 * 60,
@@ -12,9 +13,12 @@ const EDITABLE = {
   stopMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 10,
 };
 
-export function getSettings(db) {
+// With now: today's hours from the schedule changes are in openMinute/closeMinute (and closed is set), so every
+// booking check uses them; the usual hours are then in usualOpenMinute/usualCloseMinute.
+export function getSettings(db, now = null) {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'service'").get();
-  return { ...DEFAULT_SETTINGS, ...(row ? JSON.parse(row.value) : {}) };
+  const s = { ...DEFAULT_SETTINGS, ...(row ? JSON.parse(row.value) : {}) };
+  return now ? withDay(db, s, localParts(now, s.timeZone).day) : s;
 }
 
 export function updateSettings(db, changes, by) {

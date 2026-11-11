@@ -27,6 +27,7 @@ const ERRORS = {
   return_before_pickup: "The return must be after the pickup", return_outside_hours: "The return is outside service hours",
   wrong_status: "Not possible in this ride's status", not_pending: "This ride isn't waiting for an answer",
   no_time: "The route can't reach it in time without making others late", too_far: "Longer than the trip limit",
+  closed: "No rides today (schedule)",
 };
 const errorText = (c) => ERRORS[c] || c;
 
@@ -65,7 +66,7 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#logout").addEventListener("click", async () => { await api("/api/logout", { method: "POST", body: {} }); showLogin(); });
 
 // ---------- tabs ----------
-const TABS = { today, pending, families, places, announce, reports, settings, activity };
+const TABS = { today, pending, families, places, schedule, announce, reports, settings, activity };
 let current = "today";
 $("#tabs").addEventListener("click", (e) => { const t = e.target.dataset.tab; if (t) open(t); });
 function open(tab) {
@@ -352,6 +353,66 @@ async function places() {
     if (a === "edit-pl") done = await editPlace(pl);
     if (a === "remove-pl" && confirm("Remove this place?")) done = await act(() => api(`/api/admin/places/${pl}`, { method: "DELETE" }));
     if (done) open("places");
+  });
+}
+
+// ---------- schedule ----------
+// Other hours, or no rides, for a day or a range of days. Callers hear today's hours and the changes coming up.
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Shabbos"];
+const dayText = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const hoursText = (h) => (h.closed ? "No rides" : `${minuteText(h.openMinute)} – ${minuteText(h.closeMinute)}`);
+function changeText(c) {
+  const days = c.from === c.to ? dayText(c.from) : `${dayText(c.from)} to ${dayText(c.to)}`;
+  const only = c.weekdays ? `, only ${c.weekdays.map((d) => WEEKDAY_NAMES[d]).join(", ")}` : "";
+  return `${days}${only}: ${hoursText(c)}`;
+}
+async function schedule() {
+  const v = await api("/api/admin/schedule");
+  const first = v.days[0].day;
+  main.innerHTML = `
+    <div class="card"><h2>Next two weeks</h2>
+      <p class="quiet">Usual hours ${minuteText(v.usual.openMinute)} – ${minuteText(v.usual.closeMinute)} (change them under Settings). Callers hear today's hours when they're different, and can press 4 to hear the changes coming up.</p>
+      <table><tbody>${v.days.map((d) => `<tr><td>${esc(dayText(d.day))}${d.day === first ? " (today)" : ""}</td>
+        <td>${d.changed ? `<b>${esc(hoursText(d))}</b>` : esc(hoursText(d))}</td><td class="quiet">${d.changed ? "changed" : ""}</td></tr>`).join("")}</tbody></table></div>
+    <div class="card"><h2>Change the schedule</h2><form id="sch">
+      <div class="row"><label>First day <input type="date" name="from" value="${first}" min="${first}" required></label>
+        <label>Last day (empty = one day) <input type="date" name="to" min="${first}"></label></div>
+      <div class="row"><label><input type="radio" name="kind" value="hours" checked style="display:inline;width:auto"> Other hours</label>
+        <label><input type="radio" name="kind" value="closed" style="display:inline;width:auto"> No rides</label></div>
+      <div class="row" id="sch-hours"><label>From <input type="time" name="open" value="${minuteToTime(v.usual.openMinute)}"></label>
+        <label>Until <input type="time" name="close" value="${minuteToTime(v.usual.closeMinute)}"></label></div>
+      <p class="quiet">Only on some weekdays (none checked = every day in the range):
+        ${WEEKDAY_NAMES.map((n, i) => `<label style="display:inline-block;margin-right:10px"><input type="checkbox" name="wd" value="${i}" style="display:inline;width:auto"> ${n}</label>`).join("")}</p>
+      <label>Note (only you and the driver see it) <input name="note" maxlength="200"></label>
+      <button>Save</button></form></div>
+    <div class="card"><h2>Changes</h2>${v.changes.length ? `<table><tbody>${v.changes.map((c) => `<tr data-ch="${esc(c.id)}">
+      <td>${esc(changeText(c))}${c.note ? `<div class="quiet">${esc(c.note)}</div>` : ""}</td><td class="quiet">${esc(c.createdBy.replace(/^(admin|driver):/, ""))}</td>
+      <td class="actions"><button class="danger" data-act="rm-ch">Remove</button></td></tr>`).join("")}</tbody></table>
+      <p class="quiet">When changes overlap, the newest one counts.</p>` : '<p class="quiet">No changes. Every day has the usual hours.</p>'}</div>`;
+  const form = $("#sch");
+  form.addEventListener("change", () => { $("#sch-hours").hidden = form.kind.value === "closed"; });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const closed = f.get("kind") === "closed";
+    let r;
+    const ok = await act(async () => {
+      r = await api("/api/admin/schedule", { method: "POST", body: {
+        from: f.get("from"), to: f.get("to") || f.get("from"), closed, weekdays: f.getAll("wd").map(Number), note: f.get("note"),
+        ...(closed ? {} : { openMinute: timeToMinute(f.get("open")), closeMinute: timeToMinute(f.get("close")) }),
+      } });
+    }, "Saved");
+    if (!ok) return;
+    if (r.affected?.length) {
+      alert(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked outside the new hours. They were not cancelled:\n\n` +
+        r.affected.map((b) => `${dayText(b.day)} ${minuteText(b.pickup_minute)}  ${b.rider_name}  (${STATUS[b.status] || b.status}, ${b.phone})`).join("\n"));
+    }
+    open("schedule");
+  });
+  main.addEventListener("click", async (e) => {
+    if (e.target.dataset.act !== "rm-ch") return;
+    const id = e.target.closest("[data-ch]").dataset.ch;
+    if (confirm("Remove this change? Those days go back to the hours under it.") && (await act(() => api(`/api/admin/schedule/${id}`, { method: "DELETE" }), "Removed"))) open("schedule");
   });
 }
 

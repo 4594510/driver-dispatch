@@ -28,7 +28,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-- src/phone/words.js: the prompt script P01-P47 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P53 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook key check and the outgoing call/text client (adapt to Teltech's docs when they come).
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
@@ -43,7 +43,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/backup.js: the daily database copy. Dockerfile, railway.json, docs/going-live.md: hosting and the pilot.
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
-- src/settings.js: hours, areas, trip limit stored in the database.
+- src/settings.js: hours, areas, trip limit stored in the database. getSettings(db, now) puts today's schedule in.
+- src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
+  wins), set by the driver app (Hours tab) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).
 - src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
   and miles from GPS) and announcements (deliveries queued until the phone line is connected).
 - web/: the admin dashboard (plain JS, one page).

@@ -236,6 +236,20 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       at TEXT NOT NULL,
       result TEXT NOT NULL
     );
+    -- Schedule changes (schedule.js): other hours, or no rides, for a day or a range of days. The newest one counts.
+    CREATE TABLE IF NOT EXISTS schedule_changes (
+      id TEXT PRIMARY KEY,
+      from_day TEXT NOT NULL,                    -- local dates, 2026-11-11
+      to_day TEXT NOT NULL,
+      weekdays TEXT,                             -- JSON [0..6] (0 Sunday, 6 Shabbos); NULL = every day
+      closed INTEGER NOT NULL DEFAULT 0,         -- 1: no rides those days
+      open_minute INTEGER,
+      close_minute INTEGER,
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS schedule_changes_days ON schedule_changes (to_day, from_day);
   `);
   return db;
 }
