@@ -21,7 +21,11 @@ The line is 845-731-5290 (`FONORY_FROM=+18457315290`). Teltech's calls come from
 `FONORY_WEBHOOK_KEY`, and they send it as the `X-Fonory-Key` header. A request needs that exact key and one of
 those addresses.
 
-1. Upload the prompt recordings (`recordings/` in the project files) to Fonory under their codes (P01 … P53).
+Teltech's format: https://ivr.teltech.info/developers/api-box/ride-line/ (src/phone/fonory.js translates it).
+
+1. The prompts are played from our server (`prompts/`, 8 kHz copies of the recordings in the project files; re-copy
+   them with ffmpeg `-ar 8000 -ac 1` after re-recording). Only P03 must be uploaded to the Fonory box, because callers
+   hear it when our server can't answer. If all of them are uploaded there, set `FONORY_PROMPTS=uploaded`.
 2. Point Fonory's step webhook at `<PUBLIC_URL>/fonory/step` and the call-status webhook at `<PUBLIC_URL>/fonory/status`.
    A refused request is logged as "phone line: refused … from <address>".
 3. When Teltech sends their API documentation: set `FONORY_API_URL`, `FONORY_API_KEY`, and adapt

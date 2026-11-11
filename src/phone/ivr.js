@@ -1,6 +1,7 @@
 // The phone menu: one answer for every step of every call (POST /fonory/step). The flow is the "Incoming call" and
-// "Outgoing calls" sections of the phone setup doc. Fonory sends { call_id, from, direction, step, keys }; we answer
-// { play: [{ prompt } | { audio } | { say }], gather?: { step, max_keys, timeout_s }, hangup }.
+// "Outgoing calls" sections of the phone setup doc. It takes { call_id, from, direction, step, keys } and answers
+// { play: [{ prompt } | { audio } | { say }], gather?: { step, max_keys, timeout_s }, hangup }; src/phone/fonory.js
+// (readStep, toActions) translates to and from Teltech's Ride Line format.
 // Where the caller is (the ride being ordered, the list just read out) is kept per call in phone_calls.
 import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";

@@ -30,7 +30,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
 - src/phone/words.js: the prompt script P01-P53 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
-- src/phone/fonory.js: webhook key check and the outgoing call/text client (adapt to Teltech's docs when they come).
+- src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
+  (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
+  (planned on their side, field names not final). prompts/: P01-P53 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

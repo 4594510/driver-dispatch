@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY web ./web
+COPY prompts ./prompts
 COPY scripts ./scripts
 RUN mkdir -p /app/data
 EXPOSE 3000
