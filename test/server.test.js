@@ -148,14 +148,15 @@ test("the phone line needs Fonory's secret key, then answers each step", async (
   });
 });
 
-test("Teltech's servers get in by their address; anyone else needs the key", () => {
+test("the phone line needs Teltech's key, and their address when one is set", () => {
   const req = (ip, key) => ({ ip, query: key ? { key } : {}, get: () => undefined });
   const env = { FONORY_WEBHOOK_KEY: "hook-secret", FONORY_ALLOWED_IPS: "178.156.145.236, 10.0.0.9" };
-  assert.equal(webhookAllowed(req("178.156.145.236"), env), true);
-  assert.equal(webhookAllowed(req("::ffff:178.156.145.236"), env), true);
-  assert.equal(webhookAllowed(req("10.0.0.9"), env), true);
-  assert.equal(webhookAllowed(req("203.0.113.5"), env), false);
-  assert.equal(webhookAllowed(req("203.0.113.5", "hook-secret"), env), true);
-  assert.equal(webhookAllowed(req(""), { FONORY_ALLOWED_IPS: "" }), false);
-  assert.equal(webhookAllowed(req("178.156.145.236"), { FONORY_WEBHOOK_KEY: "hook-secret" }), false, "no list, no address pass");
+  assert.equal(webhookAllowed(req("178.156.145.236", "hook-secret"), env), true);
+  assert.equal(webhookAllowed(req("::ffff:178.156.145.236", "hook-secret"), env), true);
+  assert.equal(webhookAllowed(req("10.0.0.9", "hook-secret"), env), true);
+  assert.equal(webhookAllowed(req("178.156.145.236"), env), false, "right address, no key");
+  assert.equal(webhookAllowed(req("178.156.145.236", "wrong"), env), false, "right address, wrong key");
+  assert.equal(webhookAllowed(req("203.0.113.5", "hook-secret"), env), false, "right key, other address");
+  assert.equal(webhookAllowed(req("203.0.113.5", "hook-secret"), { FONORY_WEBHOOK_KEY: "hook-secret" }), true, "no list: key only");
+  assert.equal(webhookAllowed(req("178.156.145.236"), { FONORY_ALLOWED_IPS: "178.156.145.236" }), false, "no key set: nothing gets in");
 });
