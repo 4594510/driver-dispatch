@@ -27,6 +27,13 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/route.js: the planner: timing a stop order, inserting a ride without making anyone later, rebuilding a day.
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
+- src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
+- src/phone/words.js: the prompt script P01-P47 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
+- src/phone/fonory.js: webhook key check and the outgoing call/text client (adapt to Teltech's docs when they come).
+- src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
+- src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
+  Fonory, calls retried for reminders and time changes.
 - src/db.js: schema and audit log.
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.

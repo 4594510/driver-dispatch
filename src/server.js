@@ -9,6 +9,12 @@ import { openDb, newId, nowIso, audit } from "./db.js";
 import { changeStatus, proposeTime, getBooking } from "./bookings.js";
 import { bookRide, previewAccept, acceptRide, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel } from "./travel.js";
+import { phoneStep } from "./phone/ivr.js";
+import { webhookAllowed, fonoryClient } from "./phone/fonory.js";
+import { yiddishVoice } from "./phone/yiddishtools.js";
+import { makeWanted, wantAll } from "./phone/audio.js";
+import { allPieces } from "./phone/words.js";
+import { notifyBooking, queueReminders, sendDue, callEnded } from "./notify.js";
 import * as auth from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { report } from "./reports.js";
@@ -48,6 +54,33 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   app.use(express.json({ limit: "200kb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // --- the phone line (Fonory) ---
+  const baseUrl = (req) => (env.PUBLIC_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  const notify = (b, kind, payload) => notifyBooking(db, b, kind, payload);
+  const fonory = express.Router();
+  fonory.use(express.urlencoded({ extended: false }));
+  fonory.use((req, res, next) => (webhookAllowed(req, env) ? next() : res.status(403).json({ error: "forbidden" })));
+  fonory.post("/step", async (req, res) => {
+    try {
+      res.json(await phoneStep({ db, travel, settings: getSettings(db), now: clock(), base: baseUrl(req), notify }, req.body || {}));
+    } catch (e) {
+      console.error("phone step failed:", e);
+      res.json({ play: [{ prompt: "P03" }], hangup: true });
+    }
+  });
+  fonory.post("/status", (req, res) => {
+    const { call_id: callId, result } = req.body || {};
+    if (!callId || !result) return res.status(400).json({ error: "call_id and result are needed" });
+    res.json({ ok: true, outcome: callEnded(db, String(callId), String(result), clock()) });
+  });
+  app.use("/fonory", fonory);
+  // Audio Fonory plays from us: saved pieces and uploaded recordings, under random names.
+  app.get(["/audio/clips/:file", "/audio/:file"], (req, res) => {
+    if (!/^[a-f0-9]{16,40}\.(wav|mp3|m4a|ogg|webm)$/.test(req.params.file)) return res.status(404).end();
+    const dir = req.path.startsWith("/audio/clips/") ? path.join(recordingsDir, "clips") : recordingsDir;
+    res.sendFile(path.join(dir, req.params.file), (err) => err && !res.headersSent && res.status(404).end());
+  });
   app.get("/", (_req, res) => res.redirect("/admin/"));
   app.use("/admin", express.static(path.join(here, "..", "web")));
 
@@ -152,7 +185,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     if (!GENDERS.includes(gender)) return bad(res, "Choose man or woman.");
     if (!db.prepare("SELECT 1 FROM households WHERE id = ? AND active = 1").get(householdId)) return bad(res, "Unknown family.");
     const id = newId("ps");
-    db.prepare("INSERT INTO passengers (id, household_id, name, gender, notes) VALUES (?, ?, ?, ?, ?)").run(id, householdId, name, gender, notes);
+    const spoken = String(req.body.spoken || "").trim() || null;
+    db.prepare("INSERT INTO passengers (id, household_id, name, gender, notes, spoken) VALUES (?, ?, ?, ?, ?, ?)").run(id, householdId, name, gender, notes, spoken);
     audit(db, req.actor, "passenger_added", null, { id, name });
     res.json({ ok: true, id });
   });
@@ -163,7 +197,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const gender = req.body.gender ?? p.gender;
     const notes = req.body.notes ?? p.notes;
     if (!name || !GENDERS.includes(gender)) return bad(res, "Name and man/woman are needed.");
-    db.prepare("UPDATE passengers SET name = ?, gender = ?, notes = ? WHERE id = ?").run(name, gender, notes, p.id);
+    const spoken = req.body.spoken != null ? String(req.body.spoken).trim() || null : p.spoken;
+    db.prepare("UPDATE passengers SET name = ?, gender = ?, notes = ?, spoken = ? WHERE id = ?").run(name, gender, notes, spoken, p.id);
     audit(db, req.actor, "passenger_changed", null, { id: p.id });
     res.json({ ok: true });
   });
@@ -216,7 +251,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const taken = db.prepare("SELECT 1 FROM places WHERE active = 1 AND code = ? AND (household_id IS NULL OR ? IS NULL OR household_id = ?)").get(code, householdId, householdId);
     if (taken) return bad(res, `Code ${code} is already used.`);
     const id = newId("pl");
-    db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES (?, ?, ?, ?, ?, ?)").run(id, householdId, code, kind, name, address);
+    const spoken = String(req.body.spoken || "").trim() || null;
+    db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, spoken) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, householdId, code, kind, name, address, spoken);
     audit(db, req.actor, "place_added", null, { id, code, name });
     res.json({ ok: true, id });
   });
@@ -226,6 +262,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const name = String(req.body.name ?? p.name).trim();
     const address = String(req.body.address ?? p.address).trim();
     if (!name || !address) return bad(res, "Name and address are needed.");
+    if (req.body.spoken != null) db.prepare("UPDATE places SET spoken = ? WHERE id = ?").run(String(req.body.spoken).trim() || null, p.id);
     db.prepare("UPDATE places SET name = ?, address = ?, lat = CASE WHEN ? = address THEN lat END, lng = CASE WHEN ? = address THEN lng END WHERE id = ?")
       .run(name, address, address, address, p.id);
     audit(db, req.actor, "place_changed", null, { id: p.id });
@@ -260,6 +297,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   admin.post("/bookings", async (req, res) => {
     const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db), req.actor);
+    if (r.ok) for (const b of r.bookings) notify(b, "booked");
     res.status(r.ok ? 200 : 400).json(r);
   });
   admin.get("/route", (req, res) => {
@@ -298,12 +336,20 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     if (["accept", "propose"].includes(action) && !driverId) return bad(res, "Add a driver first.");
     let r;
     const settings = getSettings(db);
-    if (action === "accept") r = await acceptRide(db, travel, id, driverId, settings, clock());
-    else if (action === "propose") r = proposeTime(db, id, req.body.minute, driverId);
+    if (action === "accept") {
+      r = await acceptRide(db, travel, id, driverId, settings, clock());
+      if (r.ok) notify(r.booking, "accepted");
+    } else if (action === "propose") {
+      const was = getBooking(db, id);
+      r = proposeTime(db, id, req.body.minute, driverId);
+      if (r.ok) notify(r.booking, "time_change", { oldMinute: was.pickup_minute, newMinute: r.booking.proposed_minute });
+    }
     else if (["reject", "cancel", "pickup", "done", "no_show"].includes(action)) {
       const was = getBooking(db, id);
       r = changeStatus(db, id, action, req.actor, clock(), settings);
       if (r.ok && ["accepted", "picked_up"].includes(was.status)) await refreshDay(db, travel, was.day, settings, clock());
+      if (r.ok && action === "reject") notify(r.booking, "not_taken");
+      if (r.ok && action === "cancel" && !req.actor.startsWith("phone:")) notify(r.booking, "cancelled");
     } else return res.status(404).json({ error: "unknown_action" });
     res.status(r.ok ? 200 : 400).json(r);
   });
@@ -344,7 +390,37 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   return app;
 }
 
+// Background work every 20 seconds: reminders, sending what's due through Fonory, recording spoken pieces.
+export function startLoops(db, env = process.env) {
+  const client = fonoryClient(env);
+  const speak = yiddishVoice(env);
+  const dir = env.RECORDINGS_DIR || path.join(path.dirname(env.DB_FILE || "data/dispatch.db"), "recordings");
+  if (speak) {
+    wantAll(db, allPieces());
+    const names = db.prepare("SELECT coalesce(spoken, name) AS t FROM passengers WHERE active = 1 AND recording IS NULL UNION SELECT coalesce(spoken, name) FROM places WHERE active = 1 AND recording IS NULL").all();
+    wantAll(db, names.map((r) => r.t));
+  }
+  if (!client) console.log("Fonory isn't connected yet (FONORY_API_URL, FONORY_API_KEY): messages wait in the queue.");
+  let busy = false;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      queueReminders(db, getSettings(db));
+      await sendDue(db, client);
+      if (speak) await makeWanted(db, dir, speak, { limit: 10 });
+    } catch (e) {
+      console.error("background work failed:", e);
+    } finally {
+      busy = false;
+    }
+  };
+  return setInterval(tick, 20000);
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT) || 3000;
-  createApp().listen(port, () => console.log(`dispatch listening on ${port}`));
+  const db = openDb();
+  createApp(db).listen(port, () => console.log(`dispatch listening on ${port}`));
+  startLoops(db);
 }

@@ -170,7 +170,36 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (day, vehicle_id)
     );
+
+    -- The phone line (stage 4). One row per call Fonory tells us about, with where the caller is in the menu.
+    CREATE TABLE IF NOT EXISTS phone_calls (
+      call_id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
+      direction TEXT NOT NULL,                   -- inbound | outbound
+      delivery_id INTEGER,                       -- an outgoing call: the message it carries
+      state TEXT NOT NULL DEFAULT '{}',          -- JSON: step, tries, the ride being ordered
+      result TEXT,                               -- answered | no_answer | busy | failed | completed
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    -- Spoken pieces (words, numbers, names, places) made with the Yiddish voice, by their exact text.
+    CREATE TABLE IF NOT EXISTS clips (
+      text TEXT PRIMARY KEY,
+      file TEXT,                                 -- in RECORDINGS_DIR/clips
+      status TEXT NOT NULL DEFAULT 'wanted',     -- wanted | ready | failed
+      tries INTEGER NOT NULL DEFAULT 0,
+      at TEXT NOT NULL
+    );
   `);
+  addColumns(db, "passengers", { spoken: "TEXT" }); // the name in Yiddish letters, as the phone says it
+  addColumns(db, "places", { spoken: "TEXT" });
+  addColumns(db, "deliveries", {
+    due_at: "TEXT",                              // not before this time
+    payload: "TEXT",                             // JSON: what the message says (times, names)
+    body: "TEXT",                                // a text message's words
+    call_id: "TEXT",
+    note: "TEXT",                                // why it failed, or the key pressed
+  });
   addColumns(db, "bookings", {
     pickup_lat: "REAL",
     pickup_lng: "REAL",

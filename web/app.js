@@ -244,9 +244,10 @@ async function families() {
         <div class="row" style="justify-content:space-between"><h2>${esc(h.name)}</h2>
           <span><button class="ghost" data-act="rename">Rename</button> <button class="danger" data-act="remove-fam">Remove family</button></span></div>
         <h3>People</h3>
-        <table><tbody>${h.passengers.map((p) => `<tr data-ps="${esc(p.id)}"><td>${esc(p.name)}</td><td>${p.gender === "m" ? "Man" : "Woman"}</td><td class="quiet">${esc(p.notes)}</td>
+        <table><tbody>${h.passengers.map((p) => `<tr data-ps="${esc(p.id)}"><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${p.gender === "m" ? "Man" : "Woman"}</td><td class="quiet">${esc(p.notes)}</td>
           <td class="actions"><button class="ghost" data-act="edit-ps">Edit</button><button class="danger" data-act="remove-ps">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">No one yet.</td></tr>'}</tbody></table>
         <form class="row" data-form="ps"><label>Name <input name="name" required></label>
+          <label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Man or woman <select name="gender"><option value="m">Man</option><option value="f">Woman</option></select></label>
           <label>Notes for the driver <input name="notes"></label><button>Add person</button></form>
         <h3>Approved phones</h3>
@@ -259,7 +260,8 @@ async function families() {
         <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
         <form class="row" data-form="pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2" placeholder="01"></label>
           <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
-          <label>Name <input name="name" required></label><label>Address <input name="address" required></label><button>Add place</button></form>
+          <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
+          <label>Address <input name="address" required></label><button>Add place</button></form>
       </div>`).join("")}`;
 
   $("#add-fam").addEventListener("submit", async (e) => {
@@ -290,7 +292,14 @@ async function families() {
     let done = false;
     if (a === "rename") { const n = prompt("New family name"); if (n) done = await act(() => api(`/api/admin/households/${hh}`, { method: "PATCH", body: { name: n } })); }
     if (a === "remove-fam" && confirm("Remove this family and all its phones?")) done = await act(() => api(`/api/admin/households/${hh}`, { method: "DELETE" }));
-    if (a === "edit-ps") { const notes = prompt("Notes for the driver"); if (notes != null) done = await act(() => api(`/api/admin/passengers/${ps}`, { method: "PATCH", body: { notes } })); }
+    if (a === "edit-ps") {
+      const spoken = prompt("Name in Yiddish, as the phone says it (empty = keep)");
+      const notes = prompt("Notes for the driver (empty = keep)");
+      const body = {};
+      if (spoken) body.spoken = spoken;
+      if (notes) body.notes = notes;
+      if (Object.keys(body).length) done = await act(() => api(`/api/admin/passengers/${ps}`, { method: "PATCH", body }));
+    }
     if (a === "remove-ps" && confirm("Remove this person?")) done = await act(() => api(`/api/admin/passengers/${ps}`, { method: "DELETE" }));
     if (a === "remove-ph" && confirm("Remove this phone? It won't be able to book.")) done = await act(() => api(`/api/admin/phones/${encodeURIComponent(ph)}`, { method: "DELETE" }));
     if (a === "edit-pl") done = await editPlace(pl);
@@ -298,12 +307,16 @@ async function families() {
     if (done) open(current);
   });
 }
-const placeRow = (p) => `<tr data-pl="${esc(p.id)}"><td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.address)}</td>
+const placeRow = (p) => `<tr data-pl="${esc(p.id)}"><td>${esc(p.code)}</td><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${esc(p.address)}</td>
   <td class="actions"><button class="ghost" data-act="edit-pl">Edit</button><button class="danger" data-act="remove-pl">Remove</button></td></tr>`;
 async function editPlace(id) {
-  const address = prompt("New address");
-  if (!address) return false;
-  return act(() => api(`/api/admin/places/${id}`, { method: "PATCH", body: { address } }), "Saved");
+  const address = prompt("New address (empty = keep)");
+  const spoken = prompt("Name in Yiddish, as the phone says it (empty = keep)");
+  const body = {};
+  if (address) body.address = address;
+  if (spoken) body.spoken = spoken;
+  if (!Object.keys(body).length) return false;
+  return act(() => api(`/api/admin/places/${id}`, { method: "PATCH", body }), "Saved");
 }
 
 // ---------- shared places ----------
@@ -312,7 +325,8 @@ async function places() {
   main.innerHTML = `<div class="card"><h2>Shared places</h2><p class="quiet">Places every family can use, like shuls and stores. Family homes are under Families.</p>
     <table><tbody>${all.map(placeRow).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>
     <form class="row" id="add-pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2"></label>
-      <label>Name <input name="name" required></label><label>Address <input name="address" required></label><button>Add place</button></form></div>`;
+      <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
+      <label>Address <input name="address" required></label><button>Add place</button></form></div>`;
   $("#add-pl").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (await act(() => api("/api/admin/places", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Added")) open("places");
@@ -334,7 +348,7 @@ async function announce() {
     <div class="card"><h2>Send an announcement</h2>
       <form id="ann">
         <label>Message (sent as a text) <textarea name="text" rows="3" required></textarea></label>
-        <label>Recording for phones set to calls (mp3, wav, m4a) <input name="audio" type="file" accept="audio/*"></label>
+        <label>Recording for the calls (optional; without one the call reads the text in Yiddish) <input name="audio" type="file" accept="audio/*"></label>
         <label>To <select name="audience"><option value="all">Everyone</option>${fams.map((h) => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join("")}</select></label>
         <button>Send</button>
         <p class="quiet">Messages go out once the phone line is connected (stage 4). Until then they wait in the queue.</p>
@@ -355,7 +369,7 @@ async function announce() {
         recording = data.recording;
       }
       const r = await api("/api/admin/announcements", { method: "POST", body: { text: f.get("text"), audience: f.get("audience"), recording } });
-      toast(`Queued for ${r.phones} phones${r.voiceSkipped ? `; ${r.voiceSkipped} call-only phones need a recording` : ""}`);
+      toast(`Queued for ${r.phones} phones`);
       open("announce");
     });
   });
