@@ -235,6 +235,7 @@ function render() {
   if (tab === "next") main.innerHTML = nextView();
   else if (tab === "requests") main.innerHTML = requestsView();
   else if (tab === "day") main.innerHTML = dayView();
+  else if (tab === "hours") main.innerHTML = hoursView();
   else main.innerHTML = moreView();
 }
 
@@ -330,6 +331,67 @@ function moreView() {
     <p class="quiet">Updated ${lastOk ? new Date(lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never"}.</p>`;
 }
 
+// --- hours: the driver changes the schedule for a day or a few days; callers hear it on the phone ---
+let sched = null;
+let schKind = "closed";
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Shabbos"];
+const dayText = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const hoursText = (h) => (h.closed ? "No rides" : `${minuteText(h.openMinute)} – ${minuteText(h.closeMinute)}`);
+const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const toMinute = (s) => { const [h, m] = String(s || "").split(":").map(Number); return h * 60 + m; };
+
+async function loadSchedule() {
+  try {
+    const r = await api("/api/driver/schedule");
+    if (r.ok) sched = r.data;
+  } catch { /* no signal */ }
+  if (tab === "hours") render();
+}
+function hoursView() {
+  if (!sched) return '<div class="card"><p class="quiet">Loading… (the hours need signal)</p></div>';
+  const first = sched.days[0].day;
+  return `<div class="card"><h2>Next two weeks</h2>
+      <p class="quiet">Usually ${minuteText(sched.usual.openMinute)} – ${minuteText(sched.usual.closeMinute)}. Callers hear the changes on the phone.</p>
+      ${sched.days.map((d) => `<div class="stop"><div class="body">${esc(dayText(d.day))}${d.day === first ? " (today)" : ""}</div>
+        <div class="${d.changed ? (d.closed ? "late" : "") : "quiet"}">${d.changed ? `<b>${esc(hoursText(d))}</b>` : esc(hoursText(d))}</div></div>`).join("")}
+      <button class="big" data-sch-add>Change my hours…</button></div>
+    ${sched.changes.length ? `<div class="card"><h2>Changes</h2>${sched.changes.map((c) => `<div class="stop"><div class="body">
+      ${esc(c.from === c.to ? dayText(c.from) : `${dayText(c.from)} to ${dayText(c.to)}`)}${c.weekdays ? ` <span class="quiet">(${c.weekdays.map((d) => WD[d]).join(", ")})</span>` : ""}
+      <div><b>${esc(hoursText(c))}</b></div>${c.note ? `<div class="quiet">${esc(c.note)}</div>` : ""}</div>
+      <button class="bad" data-sch-remove="${esc(c.id)}">Remove</button></div>`).join("")}
+      <p class="quiet">When changes overlap, the newest one counts.</p></div>` : ""}`;
+}
+function readSheet() {
+  const f = $("#sch-form");
+  return f ? Object.fromEntries(new FormData(f)) : {};
+}
+function scheduleSheet(v = {}) {
+  const first = sched?.days[0].day || new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const open = v.open || hhmm(sched?.usual.openMinute ?? 600);
+  const close = v.close || hhmm(sched?.usual.closeMinute ?? 1080);
+  sheet(`<h2>Change my hours</h2><form id="sch-form" onsubmit="return false">
+    <label>First day <input type="date" name="from" min="${first}" value="${esc(v.from || first)}"></label>
+    <label>Last day <span class="quiet">(leave empty for one day)</span> <input type="date" name="to" min="${first}" value="${esc(v.to || "")}"></label>
+    <div class="actions"><button type="button" class="${schKind === "closed" ? "bad on" : "ghost"}" data-sch-kind="closed">No rides</button>
+      <button type="button" class="${schKind === "hours" ? "on" : "ghost"}" data-sch-kind="hours">Other hours</button></div>
+    ${schKind === "hours" ? `<label>From <input type="time" name="open" value="${esc(open)}"></label><label>Until <input type="time" name="close" value="${esc(close)}"></label>` : ""}
+    <label>Note <span class="quiet">(optional, not said on the phone)</span> <input name="note" maxlength="200" value="${esc(v.note || "")}"></label>
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-sch-save>Save</button></div></form>`);
+}
+async function saveSchedule() {
+  const v = readSheet();
+  const body = { from: v.from, to: v.to || v.from, closed: schKind === "closed", note: v.note };
+  if (schKind === "hours") Object.assign(body, { openMinute: toMinute(v.open), closeMinute: toMinute(v.close) });
+  const r = await act("/api/driver/schedule", body, { queueable: false, ok: "Saved. Callers will hear it." });
+  if (!r) return;
+  closeSheet();
+  if (r.affected?.length) {
+    alert(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked outside these hours (not cancelled):\n\n` +
+      r.affected.map((b) => `${dayText(b.day)} ${minuteText(b.pickup_minute)}  ${b.rider_name}  ${b.phone}`).join("\n"));
+  }
+  loadSchedule();
+}
+
 // --- sheets (questions over the page) ---
 function sheet(html) {
   $("#sheet-body").innerHTML = html;
@@ -368,7 +430,8 @@ function proposeSheet(id) {
   const r = today.requests.find((x) => x.id === id);
   const base = r ? r.window[0] : 600;
   const times = [];
-  for (let m = base - 60; m <= base + 90; m += 15) if (m !== base && m >= 600 && m <= 1080) times.push(m);
+  const h = today.hours || { openMinute: 600, closeMinute: 1080 };
+  for (let m = base - 60; m <= base + 90; m += 15) if (m !== base && m >= h.openMinute && m <= h.closeMinute) times.push(m);
   sheet(`<h2>Suggest a time for ${esc(r?.rider_name || "this ride")}</h2><p class="quiet">The caller is asked to agree.</p>
     <div class="chips">${times.map((m) => `<button class="ghost" data-propose-at="${m}" data-id="${id}">${minuteText(m)}</button>`).join("")}</div>
     <button class="ghost big" data-close>Cancel</button>`);
@@ -412,7 +475,16 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-tab-go]");
   if (!t) return;
   const ds = t.dataset;
-  if (ds.tab || ds.tabGo) { tab = ds.tab || ds.tabGo; reorder = null; render(); return; }
+  if (ds.tab || ds.tabGo) { tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
+  if (ds.schAdd != null) return scheduleSheet();
+  if (ds.schKind) { schKind = ds.schKind; scheduleSheet(readSheet()); return; }
+  if (ds.schSave != null) return saveSchedule();
+  if (ds.schRemove) {
+    if (!confirm("Remove this change? Those days go back to the usual hours.")) return;
+    const r = await act(`/api/driver/schedule/${ds.schRemove}/remove`, {}, { queueable: false, ok: "Removed" });
+    if (r) loadSchedule();
+    return;
+  }
   if (ds.status) {
     if (ds.status === "paused") return pauseSheet();
     if (ds.status === "offline" && !confirm("Go offline? New requests will wait until you're back.")) return;

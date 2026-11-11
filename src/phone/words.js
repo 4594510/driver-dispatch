@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P46) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P53) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -9,7 +9,7 @@ export const PROMPTS = {
   P01: `שלום עליכם, איר האט אנגערופן ${LINE_NAME}.`,
   P02: "סארי, דער נאמבער פון וואו איר רופט איז נישט רעדזשיסטערט.",
   P03: "דער סיסטעם איז יעצט נישט אוועילעבל. רופט גלייך דעם דרייווער.",
-  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. צו הערן נאכאמאל, דריקט 9.",
+  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. צו הערן ווען עס זענען דא ריידס, דריקט 4. צו הערן נאכאמאל, דריקט 9.",
   P05: "אויב איר רופט צו קאנפירמען אייער רייד, דריקט 1.",
   P06: "פאר זיך אליין, דריקט 1. פאר איינעם אנדערש, דריקט 2.",
   P07: "פאר וועמען איז די רייד?",
@@ -29,7 +29,7 @@ export const PROMPTS = {
   P21: "אייער רייד איז געשיקט געווארן צום דרייווער. איר וועט באלד באקומען א קאנפירמעישן.",
   P22: "דער דרייווער איז יעצט נישט אוועילעבל. אייער רייד ווארט, און איז נאך נישט קאנפירמט. איר וועט באקומען א מעסעדזש.",
   P23: "סארי, עס זענען נישטא קיין פאסיגע זיצן אין יענע צייט.",
-  P24: "ריידס זענען נאר פאר היינט, פון צען אינדערפרי ביז זעקס נאכמיטאג.",
+  P24: "ריידס קען מען באשטעלן נאר פאר היינט, און נישט פאר א צייט וואס איז שוין פארביי.",
   P25: "סארי, דער פלאץ איז אינדרויסן פון די געגנט.",
   P26: "סארי, די רייד איז לענגער ווי א האלבע שעה.",
   P27: "די נעקסטע אוועילעבל צייט איז",
@@ -57,6 +57,13 @@ export const PROMPTS = {
   P45: "דער דרייווער האט זיך פארשפעטיגט. די נייע צייט איז",
   P46: "דער פלאץ איז געטוישט.",
   P47: "וועלכע רייד ווילט איר טוישן? דריקט איר נאמבער.",
+  // The schedule (schedule.js): today's hours, the usual hours and the changes coming up. Times and dates come after.
+  P48: "היינט זענען דא ריידס פון",
+  P49: "היינט זענען נישטא קיין ריידס.",
+  P50: "געווענליך זענען דא ריידס פון",
+  P51: "טוישונגען אין די קומענדיגע טעג:",
+  P52: "זענען דא ריידס פון",
+  P53: "זענען נישטא קיין ריידס.",
 };
 
 // Small words between pieces, recorded once like the numbers.
@@ -77,7 +84,13 @@ export const W = {
   back: "צוריק",
   instead: "אנשטאט",
   home: "שטוב",
+  today: "היינט",
+  tomorrow: "מארגן",
 };
+
+// Dates for the schedule: "מאנטאג", or "מאנטאג נאוועמבער זעכצן" further ahead.
+export const WEEKDAYS = ["זונטאג", "מאנטאג", "דינסטאג", "מיטוואך", "דאנערשטאג", "פרייטאג", "שבת"];
+export const MONTHS = ["יאנואר", "פעברואר", "מערץ", "אפריל", "מאי", "יוני", "יולי", "אויגוסט", "סעפטעמבער", "אקטאבער", "נאוועמבער", "דעצעמבער"];
 
 const ONES = ["נול", "איינס", "צוויי", "דריי", "פיר", "פינף", "זעקס", "זיבן", "אכט", "ניין", "צען", "עלף", "צוועלף", "דרייצן", "פערצן", "פופצן", "זעכצן", "זיבעצן", "אכצן", "ניינצן"];
 const TENS = { 20: "צוואנציג", 30: "דרייסיג", 40: "פערציג", 50: "פופציג" };
@@ -104,11 +117,25 @@ export function timePieces(minute) {
 }
 export const timeText = (minute) => timePieces(minute).join(" ");
 
+// A day as pieces, said from today: tomorrow → ["מארגן"]; within the week → ["מאנטאג"]; later → ["מאנטאג",
+// "נאוועמבער", "זעכצן"].
+export function dayPieces(day, today) {
+  const at = (d) => new Date(`${d}T12:00:00Z`);
+  const diff = Math.round((at(day) - at(today)) / 864e5);
+  if (diff === 0) return [W.today];
+  if (diff === 1) return [W.tomorrow];
+  const d = at(day);
+  const weekday = WEEKDAYS[d.getUTCDay()];
+  if (diff > 1 && diff < 7) return [weekday];
+  return [weekday, MONTHS[d.getUTCMonth()], numberWords(d.getUTCDate())];
+}
+
 // Every fixed piece, to make ahead (scripts/make-recordings.mjs).
 export function allPieces() {
   const out = new Set(Object.values(W));
   for (let n = 0; n < 60; n++) out.add(numberWords(n));
   for (const n of ONES) out.add(n);
+  for (const d of [...WEEKDAYS, ...MONTHS]) out.add(d);
   return [...out];
 }
 

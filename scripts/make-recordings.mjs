@@ -1,6 +1,6 @@
-// Make the fixed prompts (P01 to P47) with the Yiddish Tools voice, one WAV per code, to upload to Fonory.
+// Make the fixed prompts (P01 to P53) with the Yiddish Tools voice, one WAV per code, to upload to Fonory.
 //   YIDDISH_TOOLS_API_KEY=... node scripts/make-recordings.mjs [--out recordings/prompts] [--only P01,P27b] [--force]
-// YT_VOICE picks the voice (default pinchas; a cloned voice is custom:<id>), YT_SPEED slow / normal / fast.
+// YT_VOICE picks the voice (default shloimy; a cloned voice is custom:<id>), YT_SPEED slow / normal / fast.
 // Existing files are kept unless --force, so a changed line is remade with --only <code> --force.
 import fs from "node:fs";
 import path from "node:path";
@@ -22,9 +22,9 @@ if (!speak) {
 fs.mkdirSync(out, { recursive: true });
 const lines = [];
 for (const [code, text] of Object.entries(PROMPTS)) {
+  lines.push(`${code}\t${text}`); // script.txt always lists every prompt, also with --only
   if (only.length && !only.includes(code)) continue;
   const file = path.join(out, `${code}.wav`);
-  lines.push(`${code}\t${text}`);
   if (fs.existsSync(file) && !force) continue;
   try {
     fs.writeFileSync(file, await speak(text));

@@ -34,15 +34,21 @@ export function localParts(date, timeZone = DEFAULT_SETTINGS.timeZone) {
 }
 
 // A time typed on the phone keypad as 4 digits ("0230", "1015") into a minute of the day. Hours 10 and 11 are the
-// morning; 12 and 1 to 9 are the afternoon (the service runs 10 AM to 6 PM, so there is no doubt).
-export function keypadTime(digits) {
+// morning; 12 and 1 to 9 are the afternoon (the usual hours are 10 AM to 6 PM). With settings, a time that only fits
+// the day's hours one way is read that way (hours from 8 AM: "0830" is the morning).
+export function keypadTime(digits, settings = null) {
   if (!/^\d{3,4}$/.test(digits)) return null;
   const d = digits.padStart(4, "0");
-  let hour = Number(d.slice(0, 2));
+  const hour = Number(d.slice(0, 2));
   const minute = Number(d.slice(2));
   if (hour < 1 || hour > 12 || minute > 59) return null;
-  if (hour >= 1 && hour <= 9) hour += 12;
-  return hour * 60 + minute;
+  const am = (hour % 12) * 60 + minute;
+  const pm = am + 12 * 60;
+  const usual = hour >= 10 && hour <= 11 ? am : pm;
+  if (!settings) return usual;
+  const fits = (m) => m >= settings.openMinute && m <= settings.closeMinute;
+  if (fits(usual) || (!fits(am) && !fits(pm))) return usual;
+  return fits(am) ? am : pm;
 }
 
 export function formatMinute(m) {
@@ -56,6 +62,7 @@ export function formatMinute(m) {
 export function checkRequest(now, req, settings = DEFAULT_SETTINGS) {
   const errors = [];
   const here = localParts(now, settings.timeZone);
+  if (settings.closed) errors.push("closed"); // a schedule change: no rides today (getSettings(db, now))
   if (req.day && req.day !== here.day) errors.push("not_today");
   const pickup = req.pickupMinute ?? here.minute;
   if (!settings.windows.includes(req.window)) errors.push("bad_window");
