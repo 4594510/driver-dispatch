@@ -35,8 +35,15 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
 - src/db.js: schema and audit log.
-- src/server.js: admin sign-in and API, serves the dashboard at /admin/.
+- src/actions.js: what the driver or an admin does to a ride (accept, reject, propose, pickup, done, no-show, cancel)
+  with the caller's messages; running late; late notices after a GPS refresh.
+- src/driver.js: the driver app's API (/api/driver: phone + PIN sign-in, Bearer token, today, status, location,
+  preview, actions with once-only keys, route order). web/driver/: the app page; android/: the APK wrapper (Java,
+  WebView + TrackingService for GPS and request notifications), built by .github/workflows/android.yml.
+- src/backup.js: the daily database copy. Dockerfile, railway.json, docs/going-live.md: hosting and the pilot.
+- src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
 - src/settings.js: hours, areas, trip limit stored in the database.
-- src/reports.js, src/announcements.js: reports and announcements (deliveries queued until the phone line is connected).
+- src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
+  and miles from GPS) and announcements (deliveries queued until the phone line is connected).
 - web/: the admin dashboard (plain JS, one page).

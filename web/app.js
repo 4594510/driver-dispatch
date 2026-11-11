@@ -157,12 +157,26 @@ function wireBookings(el, reload) {
   });
 }
 
+// The driver's status and where they were last seen.
+const ago = (iso) => {
+  if (!iso) return "never";
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+};
+const DRIVER_STATUS = { online: "Online", paused: "Paused", offline: "Offline" };
+function driverLine(d) {
+  const where = d.last_lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${d.last_lat},${d.last_lng}" target="_blank" rel="noopener">seen ${ago(d.last_seen_at)}</a>` : " · no location yet";
+  const until = d.status === "paused" && d.paused_until ? ` until ${new Date(d.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
+  return `<b>${esc(d.name)}</b>: ${DRIVER_STATUS[d.status] || esc(d.status)}${until}${where}`;
+}
+
 async function today() {
-  const [rows, fams, route] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/households"), api("/api/admin/route")]);
+  const [rows, fams, route, drivers] = await Promise.all([api("/api/admin/bookings"), api("/api/admin/households"), api("/api/admin/route"), api("/api/admin/drivers")]);
   const phones = fams.flatMap((h) => h.phones.map((p) => ({ ...p, family: h.name, places: h.places })));
   const shared = await api("/api/admin/places");
   main.innerHTML = `
-    <div class="card"><h2>Today's route <button id="recalc" class="ghost">Recalculate</button></h2>${routeCard(route)}</div>
+    <div class="card"><h2>Today's route <button id="recalc" class="ghost">Recalculate</button></h2>
+      ${drivers.map((d) => `<p>${driverLine(d)}</p>`).join("") || '<p class="quiet">No driver yet (Settings).</p>'}${routeCard(route)}</div>
     <div class="card"><h2>Today's rides</h2><div id="list">${bookingTable(rows)}</div></div>
     <div class="card"><h2>Book a ride for a caller</h2>
       <form id="book">
@@ -386,9 +400,10 @@ async function reports() {
     $("#rep").innerHTML = `<div class="stats">
       ${stat("Rides requested", r.requested)}${stat("Accepted", r.accepted)}${stat("Rejected", r.rejected)}${stat("Completed", r.completed)}
       ${stat("Passengers transported", r.passengersTransported)}${stat("Cancelled", r.cancelled)}${stat("No-shows", r.noShows)}
-      ${stat("Time changes", r.timeChanges)}${stat("Still pending", r.pending)}${stat("Average wait (min)", r.averageWaitMinutes)}
+      ${stat("Time changes", r.timeChanges)}${stat("Still pending", r.pending)}${stat("Average wait past window start (min)", r.averageWaitMinutes)}
+      ${stat("Picked up on time", r.onTimePickups ? `${r.onTimePickups.onTime} of ${r.onTimePickups.of}` : null)}${stat("Average ride (min)", r.averageRideMinutes)}
       ${stat("Driving time (min)", r.drivingMinutes)}${stat("Miles", r.miles)}</div>
-      <p class="quiet">Wait time, driving time and miles start once the driver app is in use.</p>
+      <p class="quiet">Waiting and on-time come from the pickups the driver marks in the app; driving time and miles from the app's GPS.</p>
       <div class="card"><h2>Driver activity</h2>${Object.keys(r.driverActivity).length ? `<table><tbody>${Object.entries(r.driverActivity).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</tbody></table>` : '<p class="quiet">None in this period.</p>'}</div>`;
   };
   $("#range").addEventListener("submit", (e) => { e.preventDefault(); const f = new FormData(e.target); act(() => show(f.get("from"), f.get("to"))); });
@@ -406,7 +421,10 @@ async function settings() {
         <label>Minutes at each stop <input type="number" name="stop" min="0" max="10" value="${s.stopMinutes}"></label></div>
       <label>Service areas (one per line) <textarea name="areas" rows="3">${esc(s.serviceAreas.join("\n"))}</textarea></label>
       <button>Save</button></form></div>
-    <div class="card"><h2>Drivers</h2><table><tbody>${drivers.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(d.phone)}</td><td>${esc(d.status)}</td></tr>`).join("") || '<tr><td class="quiet">No driver yet.</td></tr>'}</tbody></table>
+    <div class="card"><h2>Drivers</h2><table><tbody>${drivers.map((d) => `<tr data-driver="${esc(d.id)}"><td>${driverLine(d)}</td><td>${esc(d.phone)}</td>
+        <td class="actions"><button class="ghost" data-act="pin">${d.has_pin ? "New PIN" : "Set PIN"}</button>
+        <button class="ghost" data-act="drv-status" data-status="${d.status === "offline" ? "online" : "offline"}">Set ${d.status === "offline" ? "online" : "offline"}</button></td></tr>`).join("") || '<tr><td class="quiet">No driver yet.</td></tr>'}</tbody></table>
+      <p class="quiet">The driver signs in to the app (Android, or <a href="/driver/" target="_blank">/driver/</a> in a phone's browser) with their phone number and PIN. A new PIN signs the old phone out.</p>
       <form id="drv" class="row"><label>Name <input name="name" required></label><label>Phone <input name="phone" required></label><button>Add driver</button></form></div>
     <div class="card"><h2>Admins</h2><table><tbody>${admins.map((a) => `<tr data-email="${esc(a.email)}"><td>${esc(a.email)}</td><td class="actions"><button class="danger" data-act="rm-admin">Remove</button></td></tr>`).join("")}</tbody></table>
       <form id="adm" class="row"><label>Email <input name="email" type="email" required></label><label>Temporary password (10+ characters) <input name="password" required minlength="10"></label><button>Add admin</button></form></div>
@@ -424,6 +442,16 @@ async function settings() {
   $("#adm").addEventListener("submit", async (e) => { e.preventDefault(); if (await act(() => api("/api/admin/admins", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Admin added")) open("settings"); });
   $("#pw").addEventListener("submit", async (e) => { e.preventDefault(); if (await act(() => api("/api/admin/password", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Password changed")) e.target.reset(); });
   main.addEventListener("click", async (e) => {
+    const driver = e.target.closest("[data-driver]")?.dataset.driver;
+    if (e.target.dataset.act === "pin") {
+      const pin = prompt("New PIN for the driver (4 to 8 digits). Tell it to the driver in person.");
+      if (pin && (await act(() => api(`/api/admin/drivers/${driver}/pin`, { method: "POST", body: { pin } }), "PIN set"))) open("settings");
+      return;
+    }
+    if (e.target.dataset.act === "drv-status") {
+      if (await act(() => api(`/api/admin/drivers/${driver}/status`, { method: "POST", body: { status: e.target.dataset.status } }), "Saved")) open("settings");
+      return;
+    }
     if (e.target.dataset.act !== "rm-admin") return;
     const email = e.target.closest("[data-email]").dataset.email;
     if (confirm(`Remove ${email}?`) && (await act(() => api(`/api/admin/admins/${encodeURIComponent(email)}`, { method: "DELETE" }), "Removed"))) open("settings");

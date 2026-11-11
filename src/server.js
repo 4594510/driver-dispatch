@@ -1,13 +1,13 @@
-// The server: admin sign-in, the admin API and the dashboard page. The Fonory hotline API (stage 4) and the driver app
-// API (stage 5) are added here later.
+// The server: admin sign-in, the admin API and the dashboard page (/admin/), the Fonory hotline API (/fonory), and the
+// driver app (/driver/) with its API (/api/driver).
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { openDb, newId, nowIso, audit } from "./db.js";
-import { changeStatus, proposeTime, getBooking } from "./bookings.js";
-import { bookRide, previewAccept, acceptRide, refreshDay, dayRoute } from "./dispatch.js";
+import { getBooking } from "./bookings.js";
+import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
 import { webhookAllowed, fonoryClient } from "./phone/fonory.js";
@@ -20,6 +20,9 @@ import { getSettings, updateSettings } from "./settings.js";
 import { report } from "./reports.js";
 import { createAnnouncement, listAnnouncements } from "./announcements.js";
 import { localParts } from "./rules.js";
+import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
+import { driverRouter, setPin, driverNow } from "./driver.js";
+import { backupNow, backupDue } from "./backup.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PHONE = /^\+1\d{10}$/;
@@ -82,7 +85,12 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     res.sendFile(path.join(dir, req.params.file), (err) => err && !res.headersSent && res.status(404).end());
   });
   app.get("/", (_req, res) => res.redirect("/admin/"));
+  app.use("/driver", express.static(path.join(here, "..", "web", "driver"), { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") }));
   app.use("/admin", express.static(path.join(here, "..", "web")));
+
+  // --- the driver app ---
+  const rideCtx = () => ({ db, travel, settings: getSettings(db), now: clock(), notify });
+  app.use("/api/driver", driverRouter(db, rideCtx));
 
   // --- sign-in ---
   app.post("/api/login", (req, res) => {
@@ -275,7 +283,30 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
 
   // --- drivers ---
-  admin.get("/drivers", (_req, res) => res.json(db.prepare("SELECT * FROM drivers ORDER BY name").all()));
+  admin.get("/drivers", (_req, res) => {
+    const rows = db.prepare("SELECT id FROM drivers ORDER BY name").all();
+    res.json(rows.map(({ id }) => {
+      const { pin_hash: pin, ...d } = driverNow(db, id, clock());
+      return { ...d, has_pin: !!pin };
+    }));
+  });
+  admin.post("/drivers/:id/pin", (req, res) => {
+    const r = setPin(db, req.params.id, req.body.pin, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.post("/drivers/:id/status", (req, res) => {
+    if (!["online", "offline"].includes(req.body.status)) return bad(res, "Choose online or offline.");
+    db.prepare("UPDATE drivers SET status = ?, paused_until = NULL WHERE id = ?").run(req.body.status, req.params.id);
+    audit(db, req.actor, `driver_${req.body.status}`, null, { driverId: req.params.id });
+    res.json({ ok: true });
+  });
+  admin.get("/drivers/:id/track", (req, res) => {
+    const day = req.query.day || localParts(clock(), getSettings(db).timeZone).day;
+    const from = new Date(`${day}T00:00:00Z`).getTime() - 864e5;
+    const rows = db.prepare("SELECT at, lat, lng FROM driver_locations WHERE driver_id = ? AND at >= ? ORDER BY at LIMIT 20000").all(req.params.id, new Date(from).toISOString());
+    const tz = getSettings(db).timeZone;
+    res.json(rows.filter((p) => localParts(new Date(p.at), tz).day === day));
+  });
   admin.post("/drivers", (req, res) => {
     const name = String(req.body.name || "").trim();
     const phone = normalizePhone(req.body.phone);
@@ -330,27 +361,17 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const late = r?.route && (r.route.late[b.id] || Object.keys(r.route.late).length || Object.keys(r.route.over).length);
     res.json({ ok: true, booking: getBooking(db, b.id), warning: late ? "With the new address some pickups can't be on time. Check today's route." : null });
   });
+  admin.post("/late", (req, res) => {
+    const driverId = req.body.driverId || db.prepare("SELECT id FROM drivers ORDER BY rowid LIMIT 1").get()?.id;
+    const r = runningLate(rideCtx(), driverId, req.body.minutes);
+    res.status(r.ok ? 200 : 400).json(r);
+  });
   admin.post("/bookings/:id/:action", async (req, res) => {
     const { id, action } = req.params;
+    if (!ADMIN_ACTIONS.includes(action)) return res.status(404).json({ error: "unknown_action" });
     const driverId = req.body.driverId || db.prepare("SELECT id FROM drivers ORDER BY rowid LIMIT 1").get()?.id;
     if (["accept", "propose"].includes(action) && !driverId) return bad(res, "Add a driver first.");
-    let r;
-    const settings = getSettings(db);
-    if (action === "accept") {
-      r = await acceptRide(db, travel, id, driverId, settings, clock());
-      if (r.ok) notify(r.booking, "accepted");
-    } else if (action === "propose") {
-      const was = getBooking(db, id);
-      r = proposeTime(db, id, req.body.minute, driverId);
-      if (r.ok) notify(r.booking, "time_change", { oldMinute: was.pickup_minute, newMinute: r.booking.proposed_minute });
-    }
-    else if (["reject", "cancel", "pickup", "done", "no_show"].includes(action)) {
-      const was = getBooking(db, id);
-      r = changeStatus(db, id, action, req.actor, clock(), settings);
-      if (r.ok && ["accepted", "picked_up"].includes(was.status)) await refreshDay(db, travel, was.day, settings, clock());
-      if (r.ok && action === "reject") notify(r.booking, "not_taken");
-      if (r.ok && action === "cancel" && !req.actor.startsWith("phone:")) notify(r.booking, "cancelled");
-    } else return res.status(404).json({ error: "unknown_action" });
+    const r = await rideAction(rideCtx(), id, action, req.body, req.actor, driverId);
     res.status(r.ok ? 200 : 400).json(r);
   });
   admin.get("/bookings/:id", (req, res) => {
@@ -366,7 +387,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   admin.get("/reports", (req, res) => {
     const today = localParts(clock(), getSettings(db).timeZone).day;
-    res.json(report(db, req.query.from || today, req.query.to || today));
+    res.json(report(db, req.query.from || today, req.query.to || today, getSettings(db).timeZone));
   });
   admin.get("/audit", (_req, res) => res.json(db.prepare("SELECT * FROM audit ORDER BY id DESC LIMIT 500").all()));
 
@@ -390,11 +411,13 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   return app;
 }
 
-// Background work every 20 seconds: reminders, sending what's due through Fonory, recording spoken pieces.
+// Background work every 20 seconds: reminders, sending what's due through Fonory, recording spoken pieces, and the
+// daily database copy.
 export function startLoops(db, env = process.env) {
   const client = fonoryClient(env);
   const speak = yiddishVoice(env);
   const dir = env.RECORDINGS_DIR || path.join(path.dirname(env.DB_FILE || "data/dispatch.db"), "recordings");
+  const backups = env.BACKUP_DIR || path.join(path.dirname(env.DB_FILE || "data/dispatch.db"), "backups");
   if (speak) {
     wantAll(db, allPieces());
     const names = db.prepare("SELECT coalesce(spoken, name) AS t FROM passengers WHERE active = 1 AND recording IS NULL UNION SELECT coalesce(spoken, name) FROM places WHERE active = 1 AND recording IS NULL").all();
@@ -409,6 +432,7 @@ export function startLoops(db, env = process.env) {
       queueReminders(db, getSettings(db));
       await sendDue(db, client);
       if (speak) await makeWanted(db, dir, speak, { limit: 10 });
+      if (backupDue(backups)) backupNow(db, backups, Number(env.BACKUP_KEEP) || 14);
     } catch (e) {
       console.error("background work failed:", e);
     } finally {

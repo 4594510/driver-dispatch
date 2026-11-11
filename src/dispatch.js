@@ -284,7 +284,9 @@ export async function refreshDay(db, travel, day, settings = DEFAULT_SETTINGS, n
   const built = buildRoute(p.rides, ctx, p.layout);
   // Keep the order the driver already has unless rebuilding fixes a problem the current order has.
   const problems = (t) => Object.keys(t.late).length + Object.keys(t.over).length;
-  const useBuilt = built.ok && problems(built.timing) < problems(p.before);
+  // An order the driver set by hand is kept as it is.
+  const manual = db.prepare("SELECT manual FROM routes WHERE day = ? AND vehicle_id = ?").get(day, vehicleFor(db).id)?.manual;
+  const useBuilt = !manual && built.ok && problems(built.timing) < problems(p.before);
   const stops = useBuilt ? built.stops : p.stops;
   const timing = useBuilt ? built.timing : p.before;
   const seats = useBuilt ? { ok: true, plan: built.seats } : seatRoute(stops, p.rides, p.layout);
@@ -292,7 +294,45 @@ export async function refreshDay(db, travel, day, settings = DEFAULT_SETTINGS, n
   return { ok: true, route: describe(stops, timing), seatProblem: !seats.ok };
 }
 
-// The saved route for a day, for the dashboard and (stage 5) the driver app.
+// The driver puts the stops in their own order (the app's Day tab). order: [{ booking_id, kind }], the same stops
+// as the saved route. Refused when a drop-off comes before its pickup or the seats can't work; lateness is allowed
+// (the driver chose it) and returned so the app can show it. The order is then kept by later refreshes.
+export async function reorderRoute(db, travel, day, order, settings = DEFAULT_SETTINGS, now = new Date()) {
+  const rows = routedRows(db, day);
+  const rides = rows.map(rideOf);
+  const stops = (Array.isArray(order) ? order : []).map((s) => ({ ride: String(s.booking_id), kind: s.kind }));
+  const want = new Set();
+  for (const r of rides) {
+    if (!r.onBoard) want.add(`${r.id}:pickup`);
+    want.add(`${r.id}:dropoff`);
+  }
+  const got = new Set(stops.map((s) => `${s.ride}:${s.kind}`));
+  if (got.size !== stops.length || got.size !== want.size || [...want].some((k) => !got.has(k))) return { ok: false, errors: ["route_changed"] };
+  for (const r of rides) {
+    if (r.onBoard) continue;
+    const pi = stops.findIndex((s) => s.ride === r.id && s.kind === "pickup");
+    const di = stops.findIndex((s) => s.ride === r.id && s.kind === "dropoff");
+    if (di < pi) return { ok: false, errors: ["dropoff_before_pickup"], booking_id: r.id };
+  }
+  const { layout } = vehicleFor(db);
+  const seats = seatRoute(stops, rides, layout);
+  if (!seats.ok) return { ok: false, errors: ["no_seats"] };
+  const ctx = contextFor(db, travel, settings, day, now);
+  await prefetch(db, travel, rides, ctx);
+  const timing = timeRoute(stops, rides, ctx);
+  saveRoute(db, day, stops, timing, seats.plan);
+  db.prepare("UPDATE routes SET manual = 1 WHERE day = ? AND vehicle_id = ?").run(day, vehicleFor(db).id);
+  audit(db, "system", "route_reordered", null, { day, late: roundAll(timing.late), over: roundAll(timing.over) });
+  return { ok: true, route: describe(stops, timing) };
+}
+
+// Back to the planner's order (the driver's "Best order" button).
+export async function autoRoute(db, travel, day, settings = DEFAULT_SETTINGS, now = new Date()) {
+  db.prepare("UPDATE routes SET manual = 0 WHERE day = ? AND vehicle_id = ?").run(day, vehicleFor(db).id);
+  return refreshDay(db, travel, day, settings, now);
+}
+
+// The saved route for a day, for the dashboard and the driver app.
 export function dayRoute(db, day) {
   const v = vehicleFor(db);
   const row = db.prepare("SELECT * FROM routes WHERE day = ? AND vehicle_id = ?").get(day, v.id);
