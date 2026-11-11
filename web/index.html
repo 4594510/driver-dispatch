@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispatch admin</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="card">
+      <h1>Dispatch admin</h1>
+      <label>Email <input name="email" type="email" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header>
+      <strong>Dispatch admin</strong>
+      <nav id="tabs">
+        <button data-tab="today">Today</button>
+        <button data-tab="pending">Pending</button>
+        <button data-tab="families">Families</button>
+        <button data-tab="places">Places</button>
+        <button data-tab="announce">Announcements</button>
+        <button data-tab="reports">Reports</button>
+        <button data-tab="settings">Settings</button>
+        <button data-tab="activity">Activity</button>
+      </nav>
+      <span class="me"><span id="me"></span> <button id="logout" class="link">Sign out</button></span>
+    </header>
+    <main id="main"></main>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
