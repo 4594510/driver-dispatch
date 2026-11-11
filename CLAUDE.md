@@ -6,7 +6,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 
 ## Decisions
 - Phone: Teltech Fonory hotline only (Shloime, 2026-11-10). Fonory plays pre-recorded Yiddish prompts and
-  calls our server's API at each live step. Recordings are made with Getzel's Yiddish voice. Keypad only, no speech.
+  calls our server's API at each live step. Recordings are made with Getzel's Yiddish voice. Keypad only, except saying a one-time address.
 - Language: Yiddish only for now; households.language exists so English can be added later.
 - Driver app: Android APK. Admin dashboard: English, web.
 - Seating: front seat 1 man only; rows 2 and 3 hold 3 each, one gender per row, unless one booking marked
@@ -22,17 +22,19 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/seating.js: seat plans across a whole route, seats by stop.
 - src/rules.js: hours, windows, keypad times, change cut-off.
 - src/bookings.js: checking and saving ride requests (prepareRide, saveRides), propose time, status changes.
-- src/travel.js: Google Geocoding and Routes API (computeRouteMatrix, traffic by hour), cached in geocodes and
+- src/travel.js: Google Geocoding (lookup checks a new address: near Monsey, more than a town) and Routes API (computeRouteMatrix, traffic by hour), cached in geocodes and
   travel_times; straight-line estimate without a key (ROUTES_TRAFFIC=off drops traffic).
 - src/route.js: the planner: timing a stop order, inserting a ride without making anyone later, rebuilding a day.
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-- src/phone/words.js: the prompt script P01-P55 (must match the doc's Recording script), Yiddish numbers, times, texts.
+  Key 3 at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
+  spoken step), travel.lookup finds it, it is read back in English (P56-P59), and it is never saved as a place.
+- src/phone/words.js: the prompt script P01-P59 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P55 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P59 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

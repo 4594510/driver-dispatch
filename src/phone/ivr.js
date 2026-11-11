@@ -10,6 +10,7 @@ import { keypadTime, localParts, canChangePickup } from "../rules.js";
 import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
+import { AREA_KM } from "../travel.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
 
@@ -36,7 +37,7 @@ export async function phoneStep(ctx, body) {
     call = db.prepare("SELECT * FROM phone_calls WHERE call_id = ?").get(callId);
   }
   const st = JSON.parse(call.state || "{}");
-  const c = { ...ctx, call, st, keys, step, from, say: (t) => piece(db, ctx.base, t), name: (row) => namePiece(db, ctx.base, row) };
+  const c = { ...ctx, call, st, keys, step, from, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name: (row) => namePiece(db, ctx.base, row) };
   const res = call.delivery_id ? await outbound(c) : await inbound(c);
   db.prepare("UPDATE phone_calls SET state = ?, updated_at = ? WHERE call_id = ?").run(JSON.stringify(st), nowIso(), callId);
   return clean(res);
@@ -50,6 +51,8 @@ function normalize(s) {
 }
 const clean = (res) => ({ ...res, play: (res.play || []).flat(Infinity).filter(Boolean), hangup: !!res.hangup });
 const ask = (step, play, maxKeys = 1) => ({ play, gather: { step, max_keys: maxKeys, timeout_s: 6 } });
+// Let the caller speak (a one-time address): Fonory turns it into text and comes back to `step` with it.
+const listen = (step, play) => ({ play, listen: { step, max_s: 20 } });
 const end = (play) => ({ play: [play, P("P41")], hangup: true });
 
 // A wrong key or none: say so and ask again, twice at most, then say goodbye.
@@ -77,6 +80,18 @@ const numberOf = (c, n) => c.say(numberWords(n));
 
 function placeRow(c, id) {
   return id ? c.db.prepare("SELECT * FROM places WHERE id = ?").get(id) : null;
+}
+// "12 Main St, Monsey, NY 10952, USA" → "12 Main Street, Monsey": the part worth saying back, in words.
+const STREET_WORDS = { St: "Street", Rd: "Road", Ave: "Avenue", Ln: "Lane", Dr: "Drive", Ct: "Court", Pl: "Place", Blvd: "Boulevard", Ter: "Terrace", Hwy: "Highway", Pkwy: "Parkway", Cir: "Circle", N: "North", S: "South", E: "East", W: "West" };
+export function spokenAddress(address) {
+  const parts = String(address || "").split(",").map((x) => x.trim()).filter(Boolean)
+    .filter((x) => !/^(USA|United States)$/i.test(x) && !/^[A-Z]{2}( \d{5}(-\d{4})?)?$/.test(x));
+  return parts.slice(0, 2).join(", ").replace(/\b([A-Z][a-z]{0,3})\b\.?/g, (m, w) => STREET_WORDS[w] || m);
+}
+// A ride end: a saved place by its name, or a one-time address read out in English.
+function endPiece(c, placeId, address) {
+  const row = placeRow(c, placeId);
+  return row ? c.name(row) : address ? { say: spokenAddress(address), language: "english" } : null;
 }
 function riderPiece(c, b) {
   const p = b.passenger_id ? c.db.prepare("SELECT * FROM passengers WHERE id = ?").get(b.passenger_id) : null;
@@ -147,7 +162,7 @@ function ridesToday(c, statuses) {
 function rideItems(c, b, i) {
   return [
     P("P29"), numberOf(c, i + 1), riderPiece(c, b),
-    c.say(W.from), c.name(placeRow(c, b.pickup_place_id)), c.say(W.to), c.name(placeRow(c, b.dropoff_place_id)),
+    c.say(W.from), endPiece(c, b.pickup_place_id, b.pickup_address), c.say(W.to), endPiece(c, b.dropoff_place_id, b.dropoff_address),
     P("P31"), timeOf(c, b.eta_minute ?? b.pickup_minute),
     P(["accepted", "picked_up"].includes(b.status) ? "P30a" : "P30b"),
   ];
@@ -203,7 +218,7 @@ function readBack(c) {
   const pass = d.passengerId ? c.db.prepare("SELECT * FROM passengers WHERE id = ?").get(d.passengerId) : null;
   return [
     P("P19"), pass ? c.name(pass) : null, peopleOf(c, d.men, d.women),
-    c.say(W.from), c.name(placeRow(c, d.from)), c.say(W.to), c.name(placeRow(c, d.to)),
+    c.say(W.from), endPiece(c, d.from, d.fromAddress?.address), c.say(W.to), endPiece(c, d.to, d.toAddress?.address),
     d.pickupMinute != null ? [c.say(W.at), timeOf(c, d.pickupMinute)] : c.say("יעצט"),
     d.returnMinute != null ? [c.say(W.and), c.say(W.back), c.say(W.at), timeOf(c, d.returnMinute)] : null,
     P("P20"),
@@ -226,7 +241,7 @@ async function book(c) {
   const d = c.st.draft;
   const input = {
     phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", men: d.men, women: d.women, together: !!d.together,
-    pickup: { placeId: d.from }, dropoff: { placeId: d.to }, pickupMinute: d.pickupMinute ?? null, window: d.window,
+    pickup: d.from ? { placeId: d.from } : d.fromAddress, dropoff: d.to ? { placeId: d.to } : d.toAddress, pickupMinute: d.pickupMinute ?? null, window: d.window,
     returnMinute: d.returnMinute ?? undefined,
   };
   const r = await bookRide(c.db, c.travel, input, c.now, c.settings, `phone:${c.phone.number}`);
@@ -321,6 +336,10 @@ const STEPS = {
   },
   from: (c) => pickPlace(c, "from", "to"),
   from_code: (c) => placeCode(c, "from", "to"),
+  from_say: (c) => heardAddress(c, "from"),
+  from_ok: (c) => confirmAddress(c, "from", "to"),
+  to_say: (c) => heardAddress(c, "to"),
+  to_ok: (c) => confirmAddress(c, "to", "when"),
   to: (c) => pickPlace(c, "to", "when"),
   to_code: (c) => placeCode(c, "to", "when"),
   when(c) {
@@ -426,7 +445,36 @@ function pickPlace(c, which, next) {
     return ask(`${which}_code`, Q[`${which}_code`](), 3);
   }
   if (c.keys === "2") return ask(`${which}_code`, Q[`${which}_code`](), 3);
+  if (c.keys === "3") return listen(`${which}_say`, [P("P56")]);
   return retry(c, which, Q[which]());
+}
+
+// ---------- a one-time address: said out loud, found on the map, read back, not saved to the family's places ----------
+async function heardAddress(c, which) {
+  const text = String(c.transcript || "").trim();
+  const again = (why) => {
+    c.st.tries ||= {};
+    c.st.tries[`${which}_say`] = (c.st.tries[`${which}_say`] || 0) + 1;
+    // After two misses, back to choosing a saved place.
+    if (c.st.tries[`${which}_say`] > TRIES) { settle(c, `${which}_say`); return ask(which, [why, Q[which]()]); }
+    return listen(`${which}_say`, [why, P("P56")]);
+  };
+  if (!text) return again(P("P43"));
+  const found = c.travel.lookup ? await c.travel.lookup(text) : { status: "unknown" };
+  if (found.status === "not_found" || found.km > AREA_KM) return again(P("P59"));
+  settle(c, `${which}_say`);
+  c.st.heard = found.status === "found"
+    ? { address: found.formatted, lat: found.lat, lng: found.lng }
+    : { address: text }; // no map key: the driver gets the words as said
+  return ask(`${which}_ok`, [P("P57"), { say: spokenAddress(c.st.heard.address), language: "english" }, P("P58")]);
+}
+function confirmAddress(c, which, next) {
+  if (c.keys === "2") return listen(`${which}_say`, [P("P56")]);
+  if (c.keys !== "1" || !c.st.heard) return retry(c, `${which}_ok`, [P("P58")]);
+  c.st.draft[which] = null;
+  c.st.draft[`${which}Address`] = c.st.heard;
+  c.st.heard = null;
+  return ask(next, Q[next]());
 }
 function placeCode(c, which, next) {
   if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], 3);
@@ -437,6 +485,7 @@ function placeCode(c, which, next) {
 function setPlace(c, which, place, next) {
   if (which === "to" && place.id === c.st.draft.from) return retry(c, "to", Q.to());
   c.st.draft[which] = place.id;
+  c.st.draft[`${which}Address`] = null;
   return ask(next, Q[next]());
 }
 

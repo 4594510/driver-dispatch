@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/db.js";
-import { createTravel, pointKey, estimateMinutes } from "../src/travel.js";
+import { createTravel, pointKey, estimateMinutes, spokenNumbers } from "../src/travel.js";
 
 const A = pointKey(41.11, -74.04);
 const B = pointKey(41.12, -74.05);
@@ -68,4 +68,29 @@ test("Google failing is logged, never thrown", async () => {
   await t.ensure([{ a: A, b: B, minute: 600 }]);
   assert.equal(t.minutes(A, B, 600).estimated, true);
   assert.match(logs[0], /API not enabled/);
+});
+
+test("checking an address: spoken numbers become digits, a far match is tried in Monsey, an area alone is not found", async () => {
+  assert.equal(spokenNumbers("twenty five Maple Avenue"), "25 Maple Avenue");
+  assert.equal(spokenNumbers("one hundred three Route 59"), "103 Route 59");
+  const asked = [];
+  const answers = {
+    "12 Main St": { types: ["street_address"], formatted_address: "12 Main St, Livingston Manor, NY", geometry: { location: { lat: 41.9, lng: -74.8 }, location_type: "ROOFTOP" } },
+    "12 Main St, Monsey, NY": { types: ["street_address"], formatted_address: "12 Main St, Monsey, NY 10952, USA", geometry: { location: { lat: 41.108, lng: -74.069 }, location_type: "ROOFTOP" } },
+    "Nowhere": { types: ["country", "political"], formatted_address: "United States", geometry: { location: { lat: 38, lng: -97 }, location_type: "APPROXIMATE" }, partial_match: true },
+  };
+  const fetch = async (url) => {
+    const a = new URL(url).searchParams.get("address");
+    asked.push(a);
+    const r = answers[a];
+    return { json: async () => (r ? { status: "OK", results: [r] } : { status: "ZERO_RESULTS", results: [] }) };
+  };
+  const t = createTravel(openDb(":memory:"), { apiKey: "k", fetch, log: () => {} });
+  const r = await t.lookup("twelve Main St");
+  assert.deepEqual(asked, ["12 Main St", "12 Main St, Monsey, NY"]);
+  assert.equal(r.formatted, "12 Main St, Monsey, NY 10952, USA");
+  assert.equal(r.exact, true);
+  assert.equal(r.km, 0);
+  assert.equal((await t.lookup("Nowhere")).status, "not_found");
+  assert.equal((await createTravel(openDb(":memory:"), {}).lookup("12 Main St")).status, "unknown");
 });

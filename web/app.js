@@ -31,15 +31,21 @@ const ERRORS = {
 };
 const errorText = (c) => ERRORS[c] || c;
 
-function toast(msg) {
+function toast(msg, ms = 3000) {
   const t = $("#toast");
   t.textContent = msg;
   t.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 3000);
+  toast.timer = setTimeout(() => (t.hidden = true), ms);
 }
+// ok: the message on success. A saved address can come back with a warning from the map check: shown longer.
 async function act(fn, ok) {
-  try { await fn(); if (ok) toast(ok); return true; } catch (e) { if (e.message !== "signed out") toast(e.message); return false; }
+  try {
+    const r = await fn();
+    if (r?.warning) toast(`${ok ? `${ok}. ` : ""}${r.warning}`, 10000);
+    else if (ok) toast(r?.found ? `${ok}: ${r.found}${r.code ? ` (code ${r.code})` : ""}` : ok, r?.found ? 6000 : 3000);
+    return true;
+  } catch (e) { if (e.message !== "signed out") toast(e.message); return false; }
 }
 
 const minuteText = (m) => {
@@ -202,8 +208,10 @@ async function today() {
           <label><input name="together" type="checkbox"> Men and women may sit together</label>
         </div>
         <div class="row">
-          <label>From <select name="from">${placeOptions(shared)}</select></label>
-          <label>To <select name="to">${placeOptions(shared)}</select></label>
+          <label>From <select name="from"></select></label>
+          <label hidden>From address (this ride only) <input name="fromAddress" placeholder="12 Main St, Monsey NY"></label>
+          <label>To <select name="to"></select></label>
+          <label hidden>To address (this ride only) <input name="toAddress" placeholder="12 Main St, Monsey NY"></label>
         </div>
         <div class="row">
           <label>Pickup time (empty = now) <input name="time" type="time"></label>
@@ -215,12 +223,35 @@ async function today() {
     </div>`;
   const reload = () => open("today");
   wireBookings($("#list"), reload);
+  // From and To list the caller's family places and the shared ones, plus "another address" typed for this ride only.
+  const form = $("#book");
+  const fillPlaces = () => {
+    const ph = phones.find((p) => p.number === form.phone.value);
+    const mine = shared.filter((p) => !p.household_id || p.household_id === ph?.household_id);
+    for (const end of ["from", "to"]) {
+      const was = form[end].options.length ? form[end].value : null; // null on the first fill: start on a saved place
+      form[end].innerHTML = `${placeOptions(mine)}<option value="">Another address (this ride only)…</option>`;
+      if (was != null && [...form[end].options].some((o) => o.value === was)) form[end].value = was;
+      showAddress(end);
+    }
+  };
+  const showAddress = (end) => {
+    const other = form[end].value === "";
+    form[`${end}Address`].closest("label").hidden = !other;
+    form[`${end}Address`].required = other;
+  };
+  form.phone.addEventListener("change", fillPlaces);
+  form.from.addEventListener("change", () => showAddress("from"));
+  form.to.addEventListener("change", () => showAddress("to"));
+  fillPlaces();
   $("#book").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     const body = {
       phone: f.get("phone"), riderName: f.get("riderName"), men: Number(f.get("men")), women: Number(f.get("women")),
-      together: !!f.get("together"), pickup: { placeId: f.get("from") }, dropoff: { placeId: f.get("to") },
+      together: !!f.get("together"),
+      pickup: f.get("from") ? { placeId: f.get("from") } : { address: f.get("fromAddress") },
+      dropoff: f.get("to") ? { placeId: f.get("to") } : { address: f.get("toAddress") },
       pickupMinute: f.get("time") ? timeToMinute(f.get("time")) : null, window: Number(f.get("window")),
       returnMinute: f.get("ret") ? timeToMinute(f.get("ret")) : undefined,
     };
@@ -311,10 +342,10 @@ async function families() {
           <label>Messages by <select name="notify"><option value="both">Texts and calls</option><option value="text">Texts only</option><option value="voice">Calls only</option></select></label><button>Add phone</button></form></details>
         <h3>Saved places</h3>
         <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
-        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2" placeholder="01"></label>
+        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code on the phone <input name="code" pattern="\\d{1,2}" maxlength="2" placeholder="auto" title="1 or 2 digits, or empty for the next free code"></label>
           <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
           <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
-          <label>Address <input name="address" required></label><button>Add place</button></form></details>
+          <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></details>
         <h3>Priority</h3>
         <table><tbody>${hp.map((x) => `<tr data-pri="${esc(x.id)}"><td>${esc(x.passenger_name || "Whole family")}</td>
           <td><span class="prio p${x.level}">${esc(x.label)}</span></td><td>${esc(whenText(x))}</td><td class="quiet">${esc(x.note)}</td>
@@ -360,7 +391,7 @@ async function families() {
     const hh = e.target.closest("[data-hh]").dataset.hh;
     const f = Object.fromEntries(new FormData(e.target));
     const path = { ps: "passengers", ph: "phones", pl: "places", pri: "priorities" }[kind];
-    if (await act(() => api(`/api/admin/${path}`, { method: "POST", body: { ...f, householdId: hh } }), "Added")) open("families");
+    if (await act(() => api(`/api/admin/${path}`, { method: "POST", body: { ...f, householdId: hh } }), kind === "pl" ? "Place added" : "Added")) open("families");
   });
   main.addEventListener("change", async (e) => {
     const a = e.target.dataset.act;
@@ -413,12 +444,12 @@ async function places() {
   const all = (await api("/api/admin/places")).filter((p) => !p.household_id);
   main.innerHTML = `<div class="card"><h2>Shared places</h2><p class="quiet">Places every family can use, like shuls and stores. Family homes are under Families.</p>
     <table><tbody>${all.map(placeRow).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>
-    <form class="row" id="add-pl"><label>Code <input name="code" required pattern="\\d{2}" maxlength="2"></label>
+    <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,2}" maxlength="2" placeholder="auto" title="1 or 2 digits, or empty for the next free code"></label>
       <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
-      <label>Address <input name="address" required></label><button>Add place</button></form></div>`;
+      <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></div>`;
   $("#add-pl").addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (await act(() => api("/api/admin/places", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Added")) open("places");
+    if (await act(() => api("/api/admin/places", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Place added")) open("places");
   });
   main.addEventListener("click", async (e) => {
     const a = e.target.dataset.act;

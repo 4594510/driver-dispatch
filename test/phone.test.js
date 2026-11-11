@@ -278,3 +278,51 @@ test("menu key 5 with no messages says so", async () => {
   const r = await call(db, ["5"]);
   assert.deepEqual(prompts(r[1]), ["P54", "P04"]);
 });
+
+test("a one-time address: key 3, said out loud, found on the map, read back in English, booked but not saved", async () => {
+  const db = setup();
+  const looked = [];
+  const lookup = async (t) => {
+    looked.push(t);
+    return /main/i.test(t) ? { status: "found", lat: 41.1, lng: -74.05, formatted: "12 Main St, Monsey, NY 10952, USA", exact: true } : { status: "not_found" };
+  };
+  const extra = { travel: { ...travel, lookup } };
+  // 1 order, 1 for myself, 1 man, 0 women, 3 = from a one-time address
+  const r = await call(db, ["1", "1", "1", "0", "3"], { extra });
+  const askAddress = r[r.length - 1];
+  assert.deepEqual(askAddress.listen, { step: "from_say", max_s: 20 });
+  assert.deepEqual(prompts(askAddress), ["P56"]);
+  const step = (step, body) => phoneStep(ctx(db, extra), { call_id: "c1", from: "8455550001", step, keys: "", ...body });
+  // Nothing understood, then something not on the map: asked again.
+  assert.deepEqual(prompts(await step("from_say", { transcript: "" })), ["P43", "P56"]);
+  assert.deepEqual(prompts(await step("from_say", { transcript: "blah" })), ["P59", "P56"]);
+  const heard = await step("from_say", { transcript: "twelve main street monsey" });
+  assert.deepEqual(prompts(heard), ["P57", "P58"]);
+  assert.deepEqual(heard.play.find((p) => p.language === "english"), { say: "12 Main Street, Monsey", language: "english" });
+  assert.equal(heard.gather.step, "from_ok");
+  let last = await step("from_ok", { keys: "1" });
+  assert.equal(last.gather.step, "to");
+  // To the shul (code 20), later at 12:00, 15 minutes, no return.
+  for (const keys of ["2", "20", "2", "1200", "1", "2"]) last = await step(last.gather.step, { keys });
+  assert.ok(said(last).includes("12 Main Street, Monsey"), "the read-back says the address");
+  const done = await step(last.gather.step, { keys: "1" });
+  assert.deepEqual(prompts(done), ["P21", "P41"]);
+  const b = db.prepare("SELECT * FROM bookings").get();
+  assert.equal(b.pickup_place_id, null);
+  assert.equal(b.pickup_address, "12 Main St, Monsey, NY 10952, USA");
+  assert.equal(b.pickup_lat, 41.1);
+  assert.equal(b.dropoff_place_id, "shul");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM places").get().n, 2, "nothing added to the family's places");
+});
+
+test("a one-time address not found three times goes back to choosing a place", async () => {
+  const db = setup();
+  const extra = { travel: { ...travel, lookup: async () => ({ status: "not_found" }) } };
+  await call(db, ["1", "1", "1", "0", "3"], { extra });
+  const step = (body) => phoneStep(ctx(db, extra), { call_id: "c1", from: "8455550001", step: "from_say", keys: "", ...body });
+  await step({ transcript: "x" });
+  await step({ transcript: "y" });
+  const back = await step({ transcript: "z" });
+  assert.deepEqual(prompts(back), ["P59", "P11"]);
+  assert.equal(back.gather.step, "from");
+});
