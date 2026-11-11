@@ -238,7 +238,7 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   assert.equal(english.actions[0].language, "english");
 });
 
-test("adding a place: the code is optional or 1 digit, and the address is checked on the map", async () => {
+test("adding a place: the code is optional or 1 to 3 digits, and the address is checked on the map", async () => {
   const lookup = async (a) => /nowhere/i.test(a) ? { status: "not_found" }
     : /^main st/i.test(a) ? { status: "found", lat: 41.1, lng: -74.05, formatted: "Main St, Monsey, NY 10952, USA", exact: false }
     : /boston/i.test(a) ? { status: "found", lat: 42.36, lng: -71.06, formatted: "Boston, MA, USA", exact: false, km: 290 }
@@ -253,6 +253,9 @@ test("adding a place: the code is optional or 1 digit, and the address is checke
     assert.equal(a.body.warning, null);
     assert.equal(db.prepare("SELECT lat FROM places WHERE id = ?").get(a.body.id).lat, 41.11, "the map point is kept");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "03");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "123", name: "Shop", address: "12 Main St" })).body.code, "123", "3-digit codes");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "045", name: "Park", address: "12 Main St" })).body.code, "45");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234", name: "X", address: "12 Main St" })).status, 400, "at most 3 digits");
     const taken = await call("/api/admin/places", "POST", { householdId: hh, code: "1", name: "X", address: "12 Main St" });
     assert.equal(taken.status, 400);
     assert.match(taken.body.error, /already used by Home\. Code 02 is free/);

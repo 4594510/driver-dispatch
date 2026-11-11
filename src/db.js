@@ -45,7 +45,7 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       active INTEGER NOT NULL DEFAULT 1
     );
 
-    -- Saved places, picked on the phone by a 2-digit code. household_id NULL = shared by everyone (a shul, a store).
+    -- Saved places, picked on the phone by a 1-3 digit code. household_id NULL = shared by everyone (a shul, a store).
     CREATE TABLE IF NOT EXISTS places (
       id TEXT PRIMARY KEY,
       household_id TEXT REFERENCES households(id),

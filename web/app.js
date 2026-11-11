@@ -200,6 +200,7 @@ async function today() {
     <div class="card"><h2>Book a ride for a caller</h2>
       <form id="book">
         <div class="row">
+          <label>Last 4 digits <input name="last4" inputmode="numeric" maxlength="4" size="4" placeholder="1234" title="Type the last 4 digits of the caller's number to pick the phone"></label>
           <label>Caller's phone <select name="phone" required>${phones.map((p) => `<option value="${esc(p.number)}">${esc(p.family)}${p.person ? ` (${esc(p.person)})` : ""}: ${esc(phoneText(p.number))}</option>`).join("")}</select></label>
           <label>Rider's name (empty = the people below) <input name="riderName"></label>
         </div>
@@ -243,6 +244,17 @@ async function today() {
     form[`${end}Address`].required = other;
   };
   form.phone.addEventListener("change", fillPlaces);
+  // Typing the last 4 digits of the caller's number picks that phone.
+  form.last4.addEventListener("input", () => {
+    const d = form.last4.value.replace(/\D/g, "");
+    form.last4.setCustomValidity("");
+    if (d.length < 4) return;
+    const hits = phones.filter((p) => p.number.replace(/\D/g, "").endsWith(d));
+    if (!hits.length) { form.last4.setCustomValidity("No phone ends in these digits"); form.last4.reportValidity(); return; }
+    form.phone.value = hits[0].number;
+    form.phone.dispatchEvent(new Event("change"));
+    if (hits.length > 1) toast(`${hits.length} phones end in ${d}; picked the first. Check the list.`);
+  });
   form.from.addEventListener("change", () => showAddress("from"));
   form.to.addEventListener("change", () => showAddress("to"));
   fillPlaces();
@@ -360,7 +372,7 @@ async function families() {
           <label>Messages by <select name="notify"><option value="both">Texts and calls</option><option value="text">Texts only</option><option value="voice">Calls only</option></select></label><button>Add phone</button></form></details>
         <h3>Saved places</h3>
         <table><tbody>${h.places.map((p) => placeRow(p)).join("") || '<tr><td class="quiet">No places yet.</td></tr>'}</tbody></table>
-        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code on the phone <input name="code" pattern="\\d{1,2}" maxlength="2" placeholder="auto" title="1 or 2 digits, or empty for the next free code"></label>
+        <details class="add"><summary>+ Add a place</summary><form class="row" data-form="pl"><label>Code on the phone <input name="code" pattern="\\d{1,3}" maxlength="3" placeholder="auto" title="1 to 3 digits, or empty for the next free code"></label>
           <label>Kind <select name="kind"><option value="home">Home</option><option value="work">Work</option><option value="other">Other</option></select></label>
           <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
           <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></details>
@@ -486,7 +498,7 @@ async function places() {
   const all = (await api("/api/admin/places")).filter((p) => !p.household_id);
   main.innerHTML = `<div class="card"><h2>Shared places</h2><p class="quiet">Places every family can use, like shuls and stores. Family homes are under Families.</p>
     <table><tbody>${all.map(placeRow).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>
-    <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,2}" maxlength="2" placeholder="auto" title="1 or 2 digits, or empty for the next free code"></label>
+    <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,3}" maxlength="3" placeholder="auto" title="1 to 3 digits, or empty for the next free code"></label>
       <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
       <label>Address <input name="address" required placeholder="12 Main St, Monsey NY"></label><button>Add place</button></form></div>`;
   $("#add-pl").addEventListener("submit", async (e) => {

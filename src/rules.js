@@ -83,3 +83,6 @@ export function tripTooLong(driveMinutes, settings = DEFAULT_SETTINGS) {
 export function canChangePickup(nowMinute, pickupMinute, settings = DEFAULT_SETTINGS) {
   return pickupMinute - nowMinute > settings.changeCutoffMinutes;
 }
+
+// A place's code as saved and as pressed on the phone: 1 to 3 digits, at least 2 shown ("1" = "01", "012" = "12").
+export const normalCode = (keys) => String(Number(keys)).padStart(2, "0");
