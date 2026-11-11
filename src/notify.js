@@ -56,7 +56,7 @@ export function queueReminders(db, settings = DEFAULT_SETTINGS, now = new Date()
   for (const b of rows) {
     const eta = b.eta_minute ?? b.pickup_minute;
     const left = eta - here.minute;
-    if (left <= settings.reminderMinutesBefore && left > -settings.driverWaitMinutes) n += notifyBooking(db, b, "reminder");
+    if (left <= settings.reminderMinutesBefore && left > -settings.driverWaitMinutes) n += notifyBooking(db, b, "reminder", {}, now.toISOString());
   }
   return n;
 }

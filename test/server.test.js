@@ -238,7 +238,7 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   assert.equal(english.actions[0].language, "english");
 });
 
-test("adding a place: the code is optional or 1 to 3 digits, and the address is checked on the map", async () => {
+test("adding a place: the code is the house number when free, any 1 to 6 digits, unique for everyone; the map checks it", async () => {
   const lookup = async (a) => /nowhere/i.test(a) ? { status: "not_found" }
     : /^main st/i.test(a) ? { status: "found", lat: 41.1, lng: -74.05, formatted: "Main St, Monsey, NY 10952, USA", exact: false }
     : /boston/i.test(a) ? { status: "found", lat: 42.36, lng: -71.06, formatted: "Boston, MA, USA", exact: false, km: 290 }
@@ -246,18 +246,21 @@ test("adding a place: the code is optional or 1 to 3 digits, and the address is 
   await withServer(async (call, db) => {
     await signIn(call);
     const hh = (await call("/api/admin/households", "POST", { name: "Family" })).body.id;
+    const hh2 = (await call("/api/admin/households", "POST", { name: "Other family" })).body.id;
     const a = await call("/api/admin/places", "POST", { householdId: hh, kind: "home", name: "Home", address: "12 Main St Monsey" });
     assert.equal(a.status, 200);
-    assert.equal(a.body.code, "01", "empty code = the next free one");
+    assert.equal(a.body.code, "12", "empty code = the house number");
     assert.equal(a.body.found, "12 Main St, Monsey, NY 10952, USA");
     assert.equal(a.body.warning, null);
     assert.equal(db.prepare("SELECT lat FROM places WHERE id = ?").get(a.body.id).lat, 41.11, "the map point is kept");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh2, name: "Work", address: "12 Main St" })).body.code, "01", "house number taken: the next free code");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "03");
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "123", name: "Shop", address: "12 Main St" })).body.code, "123", "3-digit codes");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "045", name: "Park", address: "12 Main St" })).body.code, "45");
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234", name: "X", address: "12 Main St" })).status, 400, "at most 3 digits");
-    const taken = await call("/api/admin/places", "POST", { householdId: hh, code: "1", name: "X", address: "12 Main St" });
-    assert.equal(taken.status, 400);
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234", name: "Shop", address: "12 Main St" })).body.code, "1234");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234567", name: "X", address: "12 Main St" })).status, 400, "at most 6 digits");
+    assert.match((await call("/api/admin/places", "POST", { code: "100", name: "X", address: "12 Main St" })).body.error, /100 = say a new address/);
+    const taken = await call("/api/admin/places", "POST", { householdId: hh2, code: "12", name: "X", address: "12 Main St" });
+    assert.equal(taken.status, 400, "codes are shared by every family");
     assert.match(taken.body.error, /already used by Home\. Code 02 is free/);
     const missing = await call("/api/admin/places", "POST", { householdId: hh, name: "X", address: "Nowhere Road 99" });
     assert.equal(missing.status, 400);
@@ -267,6 +270,25 @@ test("adding a place: the code is optional or 1 to 3 digits, and the address is 
     assert.equal((await call(`/api/admin/places/${a.body.id}`, "PATCH", { address: "Nowhere 1" })).status, 400, "an edit is checked too");
     assert.equal((await call(`/api/admin/places/${a.body.id}`, "PATCH", { address: "14 Main St Monsey" })).status, 200);
   }, { travel: { geocode: async () => null, ensure: async () => {}, minutes: () => ({ minutes: 10, estimated: false }), lookup } });
+});
+
+test("Shloime's list of places is added once, shared, with its own codes; a family place in the way moves", async () => {
+  const { addPlaceLists, PLACE_LISTS } = await import("../src/seed.js");
+  const db = openDb(":memory:");
+  db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'A', 'x')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '01', 'home', 'Home', '33 Elm St')").run();
+  const log = [];
+  addPlaceLists(db, PLACE_LISTS, (m) => log.push(m));
+  const byCode = (c) => db.prepare("SELECT * FROM places WHERE code = ? AND active = 1").get(c);
+  assert.equal(byCode("01").name, "Satmer");
+  assert.equal(byCode("01").household_id, null);
+  assert.equal(byCode("401").name, "Atrium");
+  assert.equal(byCode("108").address, "108 Route 306, Monsey, NY 10952");
+  assert.equal(db.prepare("SELECT code FROM places WHERE id = 'home'").get().code, "33", "the family's home moved to its house number");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM places WHERE household_id IS NULL").get().n, PLACE_LISTS["places-2026-11-11"].length);
+  db.prepare("UPDATE places SET active = 0 WHERE code = '18'").run();
+  addPlaceLists(db, PLACE_LISTS, () => {});
+  assert.ok(!byCode("18"), "a place removed later does not come back");
 });
 
 test("without a map key a place is saved unchecked", async () => {

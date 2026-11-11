@@ -32,12 +32,15 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
   Key 3 at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
-  spoken step), travel.lookup finds it, it is read back in English (P56-P64), and it is never saved as a place.
-- src/phone/words.js: the prompt script P01-P64 (must match the doc's Recording script), Yiddish numbers, times, texts.
+  spoken step; also code 100), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
+  or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
+- src/places.js: saved addresses, shared by everyone for now (codes unique across all places, 1-6 digits, default the
+  house number, 100 reserved). src/seed.js: place lists Shloime gave, added once at startup.
+- src/phone/words.js: the prompt script P01-P67 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P64 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P67 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

@@ -147,7 +147,7 @@ test("messages: queued by the phone's setting, sent through Fonory, retried when
   await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1015", "1", "2", "1"], { id: "a" });
   const b = db.prepare("SELECT * FROM bookings").get();
   await acceptRide(db, travel, b.id, "drv1", settings, now);
-  assert.equal(notifyBooking(db, getBooking(db, b.id), "accepted"), 2);
+  assert.equal(notifyBooking(db, getBooking(db, b.id), "accepted", {}, now.toISOString()), 2);
   const textRow = db.prepare("SELECT body FROM deliveries WHERE kind = 'accepted' AND channel = 'text'").get();
   assert.match(textRow.body, /אייער רייד איז קאנפירמט/);
   assert.match(textRow.body, /צען פופצן אינדערפרי/);
@@ -310,7 +310,9 @@ test("a one-time address: key 3, said out loud, found on the map, read back in E
   assert.deepEqual(prompts(heard), ["P57", "P58"]);
   assert.deepEqual(heard.play.find((p) => p.language === "english"), { say: "12 Main Street, Monsey", language: "english" });
   assert.equal(heard.gather.step, "from_ok");
-  let last = await step("from_ok", { keys: "1" });
+  const keep = await step("from_ok", { keys: "1" });
+  assert.deepEqual(prompts(keep), ["P65"]);
+  let last = await step("from_keep", { keys: "2" });
   assert.equal(last.gather.step, "to");
   // To the shul (code 20), later at 12:00, 15 minutes, no return.
   for (const keys of ["2", "20", "2", "1200", "1", "2"]) last = await step(last.gather.step, { keys });
@@ -378,4 +380,65 @@ test("a relative from another family is on the list", async () => {
   db.prepare("INSERT INTO relations (id, a_id, b_id, kind, seating, created_by, created_at) VALUES ('r1', 'ps9', 'ps2', 'parent', 'normal', 't', 'x')").run();
   const r = await call(db, ["1", "1"]);
   assert.ok(said(r[2]).includes("באבי"));
+});
+
+test("a new address said on the phone can be kept for everyone: its code is the house number", async () => {
+  const db = setup();
+  const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: "12 Main St, Monsey, NY 10952, USA", exact: true });
+  const extra = { travel: { ...travel, lookup } };
+  await call(db, ["1", "1", "0", "2", "3"], { extra });
+  const step = (step, body) => phoneStep(ctx(db, extra), { call_id: "c1", from: "8455550001", step, keys: "", ...body });
+  await step("from_say", { transcript: "12 main street" });
+  await step("from_ok", { keys: "1" });
+  const kept = await step("from_keep", { keys: "1" });
+  assert.deepEqual(prompts(kept), ["P66", "P12"]);
+  assert.deepEqual(said(kept), ["איינס", "צוויי"], "the code is said digit by digit");
+  const p = db.prepare("SELECT * FROM places WHERE code = '12'").get();
+  assert.equal(p.household_id, null, "shared by everyone");
+  assert.equal(p.address, "12 Main St, Monsey, NY 10952, USA");
+  // Another family's phone can now press 12.
+  db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
+  db.prepare("INSERT INTO phones (number, household_id, notify) VALUES ('+18455550002', 'hh2', 'both')").run();
+  const other = await call(db, ["1", "1", "1", "0", "2"], { from: "8455550002", id: "c2" });
+  const r = await phoneStep(ctx(db), { call_id: "c2", from: "8455550002", step: other.at(-1).gather.step, keys: "12" });
+  assert.equal(r.gather.step, "to");
+  const s2 = db.prepare("SELECT state FROM phone_calls WHERE call_id = 'c2'").get();
+  assert.equal(JSON.parse(s2.state).draft.from, p.id);
+});
+
+test("code 100 means saying a new address, and menu key 6 just adds one", async () => {
+  const db = setup();
+  const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: "7 Ronald Dr, Monsey, NY 10952, USA", exact: true });
+  const extra = { travel: { ...travel, lookup } };
+  const r = await call(db, ["1", "1", "0", "2", "2", "100"], { extra });
+  assert.equal(r.at(-1).listen.step, "from_say");
+  const m = await call(db, ["6"], { extra, id: "m" });
+  assert.equal(m.at(-1).listen.step, "add_say");
+  const step = (step, body) => phoneStep(ctx(db, extra), { call_id: "m", from: "8455550001", step, keys: "", ...body });
+  await step("add_say", { transcript: "seven ronald drive" });
+  const saved = await step("add_ok", { keys: "1" });
+  assert.deepEqual(prompts(saved), ["P66", "P04"]);
+  assert.equal(saved.gather.step, "menu");
+  assert.equal(db.prepare("SELECT name FROM places WHERE code = '07'").get().name, "7 Ronald Drive, Monsey");
+});
+
+test("# skips a question with the usual answer", async () => {
+  const db = setup();
+  // Order, then # at every question: for myself, nobody else, no others, from home; to the shul (2, 20); # = now,
+  // # = 15 minutes, # = no return.
+  const r = await call(db, ["1", "#", "#", "#", "#", "2", "20", "#", "#", "#"]);
+  const readBack = r.at(-1);
+  assert.equal(readBack.gather.step, "confirm");
+  const d = JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = 'c1'").get().state).draft;
+  assert.equal(d.from, "home");
+  assert.equal(d.to, "shul");
+  assert.equal(d.window, 15);
+  assert.equal(d.men, 1);
+  assert.equal(d.women, 0);
+  assert.equal(d.returnMinute, null);
+  // A bare # that Teltech sends as no digits, terminated by #, skips too.
+  const db2 = setup();
+  const a = await call(db2, ["1"], { id: "t" });
+  const s = await phoneStep(ctx(db2), { call_id: "t", from: "8455550001", step: a.at(-1).gather.step, keys: "", terminated_by: "#" });
+  assert.notEqual(s.gather.step, "who");
 });
