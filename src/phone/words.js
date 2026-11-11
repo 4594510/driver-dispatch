@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P53) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P55) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -9,7 +9,7 @@ export const PROMPTS = {
   P01: `שלום עליכם, איר האט אנגערופן ${LINE_NAME}.`,
   P02: "סארי, דער נאמבער פון וואו איר רופט איז נישט רעדזשיסטערט.",
   P03: "דער סיסטעם איז יעצט נישט אוועילעבל. רופט גלייך דעם דרייווער.",
-  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. צו הערן ווען עס זענען דא ריידס, דריקט 4. צו הערן נאכאמאל, דריקט 9.",
+  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. צו הערן ווען עס זענען דא ריידס, דריקט 4. צו הערן די מעלדונגען, דריקט 5. צו הערן נאכאמאל, דריקט 9.",
   P05: "אויב איר רופט צו קאנפירמען אייער רייד, דריקט 1.",
   P06: "פאר זיך אליין, דריקט 1. פאר איינעם אנדערש, דריקט 2.",
   P07: "פאר וועמען איז די רייד?",
@@ -64,6 +64,9 @@ export const PROMPTS = {
   P51: "טוישונגען אין די קומענדיגע טעג:",
   P52: "זענען דא ריידס פון",
   P53: "זענען נישטא קיין ריידס.",
+  // Messages sent out (menu key 5): "message number 1, from Monday:" and then the message itself.
+  P54: "עס זענען נישטא קיין נייע מעלדונגען.",
+  P55: "מעלדונג נאמבער",
 };
 
 // Small words between pieces, recorded once like the numbers.
@@ -86,6 +89,7 @@ export const W = {
   home: "שטוב",
   today: "היינט",
   tomorrow: "מארגן",
+  yesterday: "נעכטן",
 };
 
 // Dates for the schedule: "מאנטאג", or "מאנטאג נאוועמבער זעכצן" further ahead.
@@ -118,15 +122,16 @@ export function timePieces(minute) {
 export const timeText = (minute) => timePieces(minute).join(" ");
 
 // A day as pieces, said from today: tomorrow → ["מארגן"]; within the week → ["מאנטאג"]; later → ["מאנטאג",
-// "נאוועמבער", "זעכצן"].
+// "נאוועמבער", "זעכצן"]. Days gone by the same way: yesterday → ["נעכטן"], earlier this week → ["מאנטאג"].
 export function dayPieces(day, today) {
   const at = (d) => new Date(`${d}T12:00:00Z`);
   const diff = Math.round((at(day) - at(today)) / 864e5);
   if (diff === 0) return [W.today];
   if (diff === 1) return [W.tomorrow];
+  if (diff === -1) return [W.yesterday];
   const d = at(day);
   const weekday = WEEKDAYS[d.getUTCDay()];
-  if (diff > 1 && diff < 7) return [weekday];
+  if (Math.abs(diff) > 1 && Math.abs(diff) < 7) return [weekday];
   return [weekday, MONTHS[d.getUTCMonth()], numberWords(d.getUTCDate())];
 }
 

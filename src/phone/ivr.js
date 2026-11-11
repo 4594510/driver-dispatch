@@ -11,6 +11,7 @@ import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
 import { upcomingChanges } from "../schedule.js";
+import { recentAnnouncements } from "../announcements.js";
 
 const ACTIVE = ["pending", "proposed", "accepted", "picked_up"];
 const CANCELLABLE = ["pending", "proposed", "accepted"];
@@ -109,6 +110,20 @@ function scheduleSpeech(c) {
       g.closed ? P("P53") : [P("P52"), timeOf(c, g.openMinute), c.say(W.until), timeOf(c, g.closeMinute)],
     ]),
   ];
+}
+
+// ---------- messages sent out ----------
+// Menu key 5: the messages from the last two weeks to everyone or to this family, newest first: "message number 1, from
+// Monday:", then the admin's recording, or the text in Fonory's Yiddish voice.
+function messagesSpeech(c) {
+  const list = recentAnnouncements(c.db, c.phone.household_id, c.now);
+  if (!list.length) return [P("P54")];
+  const day = today(c).day;
+  return list.map((a, i) => [
+    P("P55"), numberOf(c, i + 1), c.say(W.from),
+    dayPieces(localParts(new Date(a.created_at), c.settings.timeZone).day, day).map((t) => c.say(t)),
+    a.recording ? { audio: `${c.base}/audio/${a.recording}` } : { say: a.text },
+  ]);
 }
 
 // ---------- incoming ----------
@@ -262,6 +277,10 @@ const STEPS = {
     if (c.keys === "4") {
       settle(c, "menu");
       return ask("menu", [scheduleSpeech(c), MENU]);
+    }
+    if (c.keys === "5") {
+      settle(c, "menu");
+      return ask("menu", [messagesSpeech(c), MENU]);
     }
     if (c.keys === "9") return ask("menu", MENU);
     return retry(c, "menu", MENU);
