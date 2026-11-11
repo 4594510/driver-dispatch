@@ -58,7 +58,6 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       recording TEXT,
       active INTEGER NOT NULL DEFAULT 1
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS places_code ON places (ifnull(household_id, ''), code);
 
     CREATE TABLE IF NOT EXISTS drivers (
       id TEXT PRIMARY KEY,
