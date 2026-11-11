@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, normalizePhone } from "../src/server.js";
 import { openDb } from "../src/db.js";
-import { webhookAllowed } from "../src/phone/fonory.js";
+import { webhookAllowed, readStep, toActions } from "../src/phone/fonory.js";
 
 async function withServer(fn, deps = {}) {
   const db = openDb(":memory:");
@@ -131,21 +131,55 @@ test("booking, preview, accept and cancel through the API keep the day's route",
   }, { travel, now });
 });
 
-test("the phone line needs Fonory's secret key, then answers each step", async () => {
+test("the phone line speaks Teltech's format: key first, then { actions } for each step", async () => {
   await withServer(async (call, db) => {
     db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
     db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
-    const step = { call_id: "c1", from: "+18455550001", direction: "inbound", step: "start", keys: "" };
-    assert.equal((await call("/fonory/step", "POST", step)).status, 403);
-    assert.equal((await call("/fonory/step?key=wrong", "POST", step)).status, 403);
-    const r = await call("/fonory/step?key=hook-secret", "POST", step);
+    const first = { event: "new_call", call_id: "c1", caller_id: "18455550001", did: "18457315290", extension: "18457315290/", timestamp: 1, variables: {} };
+    assert.equal((await call("/fonory/step", "POST", first)).status, 403);
+    assert.equal((await call("/fonory/step?key=wrong", "POST", first)).status, 403);
+    const r = await call("/fonory/step?key=hook-secret", "POST", first);
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.play, [{ prompt: "P01" }, { prompt: "P04" }]);
-    assert.deepEqual(r.body.gather, { step: "menu", max_keys: 1, timeout_s: 6 });
-    const status = await call("/fonory/status?key=hook-secret", "POST", { call_id: "c1", result: "completed" });
+    assert.deepEqual(r.body.actions, [
+      { action: "play", file: "https://dispatch.example/prompts/P01.wav" },
+      { action: "play", file: "https://dispatch.example/prompts/P04.wav" },
+      { action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" },
+    ]);
+    const unknown = await call("/fonory/step?key=hook-secret", "POST", { ...first, call_id: "c2", caller_id: "18455559999" });
+    assert.deepEqual(unknown.body.actions, [{ action: "play", file: "https://dispatch.example/prompts/P02.wav" }, { action: "hangup" }]);
+    const status = await call("/fonory/status?key=hook-secret", "POST", { call_id: "c1", status: "completed" });
     assert.equal(status.status, 200);
     assert.equal((await call("/audio/../data.db")).status, 404);
   });
+});
+
+test("Teltech's requests and our answers translate both ways", () => {
+  const req = (query, body) => ({ query, body });
+  assert.deepEqual(readStep(req({}, { event: "new_call", call_id: "c", caller_id: "18455550142", digits: "" })),
+    { call_id: "c", from: "18455550142", direction: "inbound", step: "start", keys: "" });
+  assert.deepEqual(readStep(req({ step: "time" }, { event: "gather", call_id: "c", caller_id: "18455550142", digits: "0230" })),
+    { call_id: "c", from: "18455550142", direction: "inbound", step: "time", keys: "0230" });
+  assert.equal(readStep(req({}, { event: "outbound_answered", call_id: "o", caller_id: "1845", start: "out:7" })).step, "out:7");
+  assert.equal(readStep(req({}, { event: "outbound_answered", call_id: "o", caller_id: "1845", start: "out:7" })).direction, "outbound");
+  const base = "https://d.example";
+  assert.deepEqual(toActions({ play: [{ prompt: "P19" }, { audio: `${base}/audio/clips/ab.wav` }, { say: "צוויי" }], gather: { step: "time", max_keys: 4, timeout_s: 6 } }, base, {}).actions, [
+    { action: "play", file: `${base}/prompts/P19.wav` },
+    { action: "play", file: `${base}/audio/clips/ab.wav` },
+    { action: "say", text: "צוויי", language: "yiddish" },
+    { action: "gather", max_digits: 4, timeout: 6000, tries: 1, terminator: "#", action_url: `${base}/fonory/step?step=time` },
+  ]);
+  assert.deepEqual(toActions({ play: [{ prompt: "P41" }], hangup: true }, base, { FONORY_PROMPTS: "uploaded" }).actions,
+    [{ action: "play", file: "P41.wav" }, { action: "hangup" }]);
+});
+
+test("every prompt in the script has its 8 kHz recording in prompts/", async () => {
+  const fs = await import("node:fs");
+  const { PROMPTS } = await import("../src/phone/words.js");
+  for (const code of Object.keys(PROMPTS)) {
+    const wav = fs.readFileSync(new URL(`../prompts/${code}.wav`, import.meta.url));
+    assert.equal(wav.readUInt32LE(24), 8000, `${code} sample rate`);
+    assert.equal(wav.readUInt16LE(22), 1, `${code} mono`);
+  }
 });
 
 test("the phone line needs Teltech's key, and their address when one is set", () => {

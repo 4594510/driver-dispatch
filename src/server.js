@@ -10,7 +10,7 @@ import { getBooking } from "./bookings.js";
 import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
-import { webhookAllowed, fonoryClient } from "./phone/fonory.js";
+import { webhookAllowed, fonoryClient, readStep, toActions } from "./phone/fonory.js";
 import { yiddishVoice } from "./phone/yiddishtools.js";
 import { makeWanted, wantAll } from "./phone/audio.js";
 import { allPieces } from "./phone/words.js";
@@ -73,14 +73,16 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   fonory.post("/step", async (req, res) => {
     try {
-      res.json(await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base: baseUrl(req), notify }, req.body || {}));
+      const base = baseUrl(req);
+      res.json(toActions(await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base, notify }, readStep(req)), base, env));
     } catch (e) {
       console.error("phone step failed:", e);
-      res.json({ play: [{ prompt: "P03" }], hangup: true });
+      res.json(toActions({ play: [{ prompt: "P03" }], hangup: true }, baseUrl(req), env));
     }
   });
   fonory.post("/status", (req, res) => {
-    const { call_id: callId, result } = req.body || {};
+    const { call_id: callId } = req.body || {};
+    const result = req.body?.result || req.body?.status;
     if (!callId || !result) return res.status(400).json({ error: "call_id and result are needed" });
     res.json({ ok: true, outcome: callEnded(db, String(callId), String(result), clock()) });
   });
@@ -91,6 +93,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const dir = req.path.startsWith("/audio/clips/") ? path.join(recordingsDir, "clips") : recordingsDir;
     res.sendFile(path.join(dir, req.params.file), (err) => err && !res.headersSent && res.status(404).end());
   });
+  // The fixed prompts (P01 …), 8 kHz WAV, for Fonory to fetch by link.
+  app.use("/prompts", express.static(path.join(here, "..", "prompts"), { maxAge: "1h" }));
   app.get("/", (_req, res) => res.redirect("/admin/"));
   app.use("/driver", express.static(path.join(here, "..", "web", "driver"), { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") }));
   app.use("/admin", express.static(path.join(here, "..", "web")));

@@ -59,3 +59,45 @@ export function fonoryClient(env = process.env, fetchImpl = globalThis.fetch) {
     },
   };
 }
+
+// ---------- Teltech's Ride Line format ----------
+// Their request: { event, call_id, caller_id: "18455550142", did, digits, variables, ... } with the step in the
+// address (?step=menu); the first request of a call has no step (event "new_call"), and an answered outgoing call
+// comes with event "outbound_answered" and the start name we gave ("out:<delivery id>"). A gather that got no key
+// comes again with digits "". Older/our own shape ({ from, keys, step }) is still read.
+export function readStep(req) {
+  const b = req.body || {};
+  const step = String(req.query.step || b.step || b.start || b.start_name || b.variables?.start || "") ||
+    (b.event === "outbound_answered" ? "" : "start");
+  return {
+    call_id: b.call_id,
+    from: b.caller_id ?? b.from,
+    direction: b.event === "outbound_answered" || /^out:/.test(step) ? "outbound" : b.direction || "inbound",
+    step: step || "start",
+    keys: b.digits ?? b.keys ?? "",
+  };
+}
+
+// Our answer ({ play, gather, hangup }) as their { actions }. Fixed prompts are played from our own server
+// (/prompts/P19.wav, the recordings at 8 kHz), unless FONORY_PROMPTS=uploaded says they are in the box by name.
+export function toActions(res, base, env = process.env) {
+  const uploaded = env.FONORY_PROMPTS === "uploaded";
+  const actions = [];
+  for (const p of res.play || []) {
+    if (p.prompt) actions.push({ action: "play", file: uploaded ? `${p.prompt}.wav` : `${base}/prompts/${p.prompt}.wav` });
+    else if (p.audio) actions.push({ action: "play", file: p.audio });
+    else if (p.say) actions.push({ action: "say", text: String(p.say).slice(0, 500), language: "yiddish" });
+  }
+  if (res.gather && !res.hangup) {
+    const g = res.gather;
+    actions.push({
+      action: "gather",
+      max_digits: g.max_keys || 1,
+      timeout: (g.timeout_s || 6) * 1000,
+      tries: 1,
+      ...(g.max_keys > 1 ? { terminator: "#" } : {}),
+      action_url: `${base}/fonory/step?step=${encodeURIComponent(g.step)}`,
+    });
+  } else actions.push({ action: "hangup" });
+  return { actions };
+}
