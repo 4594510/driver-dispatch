@@ -66,4 +66,4 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   weeks of them again with menu key 5, P54-P55).
 - src/feedback.js: comments, complaints, suggestions and requests from the dashboard and driver app; Claude reads
   and answers them at /api/feedback (scripts/feedback.mjs). docs/feedback-check.md: how the regular check works.
-- web/: the admin dashboard (plain JS, one page).
+- web/: the admin dashboard (plain JS, one page): sections in a left sidebar (a top bar on phones), Overview first.

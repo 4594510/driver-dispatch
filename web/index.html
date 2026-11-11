@@ -18,9 +18,10 @@
   </div>
 
   <div id="app" hidden>
-    <header>
-      <strong>Dispatch admin</strong>
+    <aside class="side">
+      <div class="brand">Dispatch admin</div>
       <nav id="tabs">
+        <button data-tab="home">Overview</button>
         <button data-tab="today">Today</button>
         <button data-tab="pending">Pending</button>
         <button data-tab="families">Families</button>
@@ -32,9 +33,11 @@
         <button data-tab="activity">Activity</button>
         <button data-tab="feedback">Feedback</button>
       </nav>
-      <a class="link" href="https://github.com/4594510/driver-dispatch/releases/latest/download/driver-app.apk" title="Android app for the driver: open this link on the driver's phone to install it">Driver app</a>
-      <span class="me"><span id="me"></span> <button id="logout" class="link">Sign out</button></span>
-    </header>
+      <div class="side-foot">
+        <a class="link" href="https://github.com/4594510/driver-dispatch/releases/latest/download/driver-app.apk" title="Android app for the driver: open this link on the driver's phone to install it">Driver app</a>
+        <span class="me"><span id="me"></span><br><button id="logout" class="link">Sign out</button></span>
+      </div>
+    </aside>
     <main id="main"></main>
   </div>
   <div id="toast" class="toast" hidden></div>
