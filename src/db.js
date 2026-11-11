@@ -1,0 +1,162 @@
+// The database: one SQLite file. Drivers and vehicles are their own tables from the start, so a second driver or
+// vehicle later is new rows, not a rebuild (spec section 16).
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+
+export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL                        -- JSON
+    );
+
+    CREATE TABLE IF NOT EXISTS households (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'yi',       -- phone menu language; only 'yi' for now
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+
+    -- People who ride. A booking can be made for anyone in the caller's household, or for another person.
+    CREATE TABLE IF NOT EXISTS passengers (
+      id TEXT PRIMARY KEY,
+      household_id TEXT NOT NULL REFERENCES households(id),
+      name TEXT NOT NULL,
+      gender TEXT NOT NULL CHECK (gender IN ('m', 'f')),
+      recording TEXT,                            -- file name of the recorded name, for the phone menu
+      notes TEXT NOT NULL DEFAULT '',            -- instructions the driver sees
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    -- Approved phone numbers. Only these can book or check rides.
+    CREATE TABLE IF NOT EXISTS phones (
+      number TEXT PRIMARY KEY,                   -- E.164, +18455551234
+      household_id TEXT NOT NULL REFERENCES households(id),
+      passenger_id TEXT REFERENCES passengers(id),
+      notify TEXT NOT NULL DEFAULT 'both' CHECK (notify IN ('text', 'voice', 'both')),
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    -- Saved places, picked on the phone by a 2-digit code. household_id NULL = shared by everyone (a shul, a store).
+    CREATE TABLE IF NOT EXISTS places (
+      id TEXT PRIMARY KEY,
+      household_id TEXT REFERENCES households(id),
+      code TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'other',        -- home | work | other
+      name TEXT NOT NULL,
+      address TEXT NOT NULL,
+      lat REAL,
+      lng REAL,
+      recording TEXT,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS places_code ON places (ifnull(household_id, ''), code);
+
+    CREATE TABLE IF NOT EXISTS drivers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'offline',    -- online | offline | paused
+      paused_until TEXT,
+      last_lat REAL,
+      last_lng REAL,
+      last_seen_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS vehicles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      layout TEXT NOT NULL,                      -- JSON seat layout, see seating.js
+      driver_id TEXT REFERENCES drivers(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      day TEXT NOT NULL,                         -- local date, 2026-11-11
+      household_id TEXT NOT NULL REFERENCES households(id),
+      booked_by_phone TEXT NOT NULL,
+      passenger_id TEXT REFERENCES passengers(id),
+      rider_name TEXT NOT NULL,
+      men INTEGER NOT NULL,
+      women INTEGER NOT NULL,
+      together INTEGER NOT NULL DEFAULT 0,       -- men and women may share a row
+      pickup_place_id TEXT REFERENCES places(id),
+      pickup_address TEXT NOT NULL,
+      dropoff_place_id TEXT REFERENCES places(id),
+      dropoff_address TEXT NOT NULL,
+      pickup_minute INTEGER NOT NULL,            -- start of the pickup window, minutes after midnight
+      window_minutes INTEGER NOT NULL,           -- 15 or 30
+      return_of TEXT REFERENCES bookings(id),    -- set on a return trip
+      status TEXT NOT NULL DEFAULT 'pending',
+        -- pending (waiting for the driver) | accepted | rejected | proposed (driver suggested a time)
+        -- | cancelled | picked_up | completed | no_show
+      proposed_minute INTEGER,
+      driver_id TEXT REFERENCES drivers(id),
+      vehicle_id TEXT REFERENCES vehicles(id),
+      seats TEXT,                                -- JSON seat plan for this booking
+      eta_minute INTEGER,
+      confirmed_by_passenger INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS bookings_day ON bookings (day, status);
+
+    -- Every change to a booking and every driver action (spec section 16).
+    CREATE TABLE IF NOT EXISTS audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      actor TEXT NOT NULL,                       -- admin:<email> | driver:<id> | phone:<number> | system
+      action TEXT NOT NULL,
+      booking_id TEXT,
+      details TEXT NOT NULL DEFAULT '{}'
+    );
+
+    CREATE TABLE IF NOT EXISTS admins (
+      email TEXT PRIMARY KEY,
+      password_hash TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS announcements (
+      id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      recording TEXT,
+      audience TEXT NOT NULL DEFAULT 'all',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      announcement_id TEXT REFERENCES announcements(id),
+      booking_id TEXT REFERENCES bookings(id),
+      phone TEXT NOT NULL,
+      channel TEXT NOT NULL,                     -- text | voice
+      kind TEXT NOT NULL,                        -- announcement | confirmation | reminder | time_change | ...
+      status TEXT NOT NULL DEFAULT 'queued',     -- queued | sent | answered | no_answer | failed
+      attempts INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+export const newId = (prefix) => `${prefix}_${crypto.randomBytes(6).toString("hex")}`;
+export const nowIso = () => new Date().toISOString();
+
+export function audit(db, actor, action, bookingId = null, details = {}) {
+  db.prepare("INSERT INTO audit (at, actor, action, booking_id, details) VALUES (?, ?, ?, ?, ?)").run(
+    nowIso(),
+    actor,
+    action,
+    bookingId,
+    JSON.stringify(details),
+  );
+}
