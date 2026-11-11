@@ -23,6 +23,7 @@ import { localParts } from "./rules.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { driverRouter, setPin, driverNow } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
+import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
 import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -248,6 +249,17 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     res.json({ ok: true });
   });
 
+  // --- priority levels (a family or one person, always or for a time range) ---
+  admin.get("/priorities", (_req, res) => res.json(listPriorities(db)));
+  admin.post("/priorities", (req, res) => {
+    const r = addPriority(db, req.body, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.delete("/priorities/:id", (req, res) => {
+    const r = removePriority(db, req.params.id, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+
   // --- places (saved addresses, picked by a 2-digit code on the phone) ---
   admin.get("/places", (_req, res) => res.json(db.prepare("SELECT * FROM places WHERE active = 1 ORDER BY household_id IS NOT NULL, code").all()));
   admin.post("/places", (req, res) => {
@@ -327,7 +339,10 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const rows = status
       ? db.prepare("SELECT * FROM bookings WHERE status = ? ORDER BY day DESC, pickup_minute LIMIT 500").all(status)
       : db.prepare("SELECT * FROM bookings WHERE day = ? ORDER BY pickup_minute").all(day);
-    res.json(rows);
+    res.json(rows.map((b) => {
+      const p = priorityOf(db, b);
+      return { ...b, priority: p.level, priority_label: p.label };
+    }));
   });
   admin.post("/bookings", async (req, res) => {
     const r = await bookRide(db, travel, { ...req.body, phone: normalizePhone(req.body.phone) }, clock(), getSettings(db), req.actor);

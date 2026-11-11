@@ -12,6 +12,12 @@ import { getBooking } from "./bookings.js";
 import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./dispatch.js";
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
+import { priorityOf } from "./priority.js";
+
+const priorityFields = (db, b) => {
+  const p = priorityOf(db, b);
+  return { priority: p.level, priority_label: p.label };
+};
 import { addFeedback, listFeedback } from "./feedback.js";
 
 const SESSION_DAYS = 90;
@@ -206,7 +212,10 @@ export function todayFor(db, here) {
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women, together: !!b.together,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
       proposed_minute: b.proposed_minute, phone: b.booked_by_phone, return_of: b.return_of,
-    }));
+      ...priorityFields(db, b),
+    }))
+    // Higher priority first, then by pickup time.
+    .sort((a, b) => b.priority - a.priority || a.window[0] - b.window[0]);
   const manual = db.prepare("SELECT manual FROM routes WHERE day = ?").get(here.day)?.manual;
   return {
     day: here.day,
