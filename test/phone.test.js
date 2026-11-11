@@ -214,3 +214,21 @@ test("wanted pieces are recorded and then played from our server", async () => {
   assert.ok(audio.length > 0);
   assert.match(audio[0].audio, /^https:\/\/dispatch\.example\/audio\/clips\/[a-f0-9]+\.wav$/);
 });
+
+test("Yiddish Tools WAVs get their real sizes and the shloimy voice", async () => {
+  const { yiddishVoice, fixWavSizes } = await import("../src/phone/yiddishtools.js");
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0, "ascii"); head.writeUInt32LE(0x80000023, 4); head.write("WAVE", 8, "ascii");
+  head.write("data", 36, "ascii"); head.writeUInt32LE(0x7fffffff, 40);
+  const wav = Buffer.concat([head, Buffer.alloc(100, 1)]);
+  let sent;
+  const speak = yiddishVoice({ YIDDISH_TOOLS_API_KEY: "k" }, async (url, opts) => {
+    sent = JSON.parse(opts.body);
+    return { ok: true, arrayBuffer: async () => wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.length) };
+  });
+  const out = await speak("שלום");
+  assert.equal(sent.voice, "shloimy");
+  assert.equal(out.readUInt32LE(4), 136);
+  assert.equal(out.readUInt32LE(40), 100);
+  assert.equal(fixWavSizes(Buffer.from("not a wav")).toString(), "not a wav");
+});

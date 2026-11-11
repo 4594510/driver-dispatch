@@ -18,7 +18,7 @@ an Android driver app, and an admin web dashboard.
   phone line answers nothing.
 - `FONORY_API_URL`, `FONORY_API_KEY`, `FONORY_FROM`: Fonory's API for outgoing calls and texts. Until they're set,
   messages wait in the queue.
-- `YIDDISH_TOOLS_API_KEY`, `YT_VOICE` (default `pinchas`, or `custom:<id>` for a cloned voice), `YT_SPEED`: the
+- `YIDDISH_TOOLS_API_KEY`, `YT_VOICE` (default `shloimy`, or `custom:<id>` for a cloned voice), `YT_SPEED`: the
   Yiddish voice for recordings.
 
 ## The phone line
