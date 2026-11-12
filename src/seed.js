@@ -47,6 +47,29 @@ export function addPlaceLists(db, lists = PLACE_LISTS, log = console.log) {
     log(`places list ${key}: ${added} added`);
   }
   undoCodeMoves(db, log);
+  fixCodes(db, CODE_FIXES, log);
+}
+
+// Codes Shloime corrected (2026-11-12): Walmart and Dr Lebowitz were saved as 25 and 40 before codes could have 3
+// digits; they are 250 and 400. A place found only removed is brought back (Walmart was missing from the list).
+export const CODE_FIXES = {
+  "codes-2026-11-12": [["walmart", "250"], ["dr lebowitz", "400"]],
+};
+export function fixCodes(db, fixes = CODE_FIXES, log = console.log) {
+  for (const [key, list] of Object.entries(fixes)) {
+    const flag = `seed:${key}`;
+    if (db.prepare("SELECT 1 FROM settings WHERE key = ?").get(flag)) continue;
+    const done = [];
+    for (const [name, code] of list) {
+      const p = db.prepare("SELECT * FROM places WHERE lower(trim(name)) = ? ORDER BY active DESC, rowid DESC LIMIT 1").get(name);
+      if (!p) { log(`codes ${key}: no place named ${name}`); continue; }
+      db.prepare("UPDATE places SET code = ?, active = 1 WHERE id = ?").run(code, p.id);
+      audit(db, "system:list", "place_code_changed", null, { id: p.id, from: p.code, to: code, ...(p.active ? {} : { restored: true }) });
+      log(`codes ${key}: ${p.name} ${p.code} -> ${code}${p.active ? "" : " (was removed, brought back)"}`);
+      done.push(p.name);
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(flag, JSON.stringify({ at: new Date().toISOString(), done }));
+  }
 }
 
 // 2026-11-11 the first list moved family places out of its codes (codes were unique then). Codes may now be shared,

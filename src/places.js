@@ -59,6 +59,16 @@ const pickFree = (used, address) => {
   return h && !used.has(h) ? h : freeCode(used);
 };
 
+// A changed code for an existing place: same rules as a new one (1 to 6 digits, not 100, not twice in one family).
+export function checkCode(db, place, wanted) {
+  wanted = String(wanted ?? "").trim();
+  if (!new RegExp(`^\\d{1,${MAX_CODE_DIGITS}}$`).test(wanted)) return { error: `The code must be 1 to ${MAX_CODE_DIGITS} digits.` };
+  const code = normalCode(wanted);
+  const used = usedCodes(db, place.household_id, place.id);
+  if (used.has(code)) return { error: `Code ${code} is already used by ${used.get(code)}.` };
+  return { code, sharedWith: sameCode(db, code, place.id).map((x) => x.name) };
+}
+
 // The places a caller pressing this code may mean: their own family's place(s) with it if there are any, otherwise
 // every place with it. One = take it; more = the caller chooses by name.
 export function codeMatches(db, code, householdId) {

@@ -21,7 +21,7 @@ import { scheduleView, addChange, removeChange } from "./schedule.js";
 import { report } from "./reports.js";
 import { createAnnouncement, listAnnouncements } from "./announcements.js";
 import { localParts } from "./rules.js";
-import { savePlace } from "./places.js";
+import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { driverRouter, setPin, driverNow } from "./driver.js";
@@ -338,6 +338,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const name = String(req.body.name ?? p.name).trim();
     const address = String(req.body.address ?? p.address).trim();
     if (!name || !address) return bad(res, "Name and address are needed.");
+    const code = req.body.code != null ? checkCode(db, p, req.body.code) : { code: p.code };
+    if (code.error) return bad(res, code.error);
     let point = address === p.address && p.lat != null ? { lat: p.lat, lng: p.lng } : null;
     let check = {};
     if (address !== p.address) {
@@ -346,9 +348,10 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
       point = check.point;
     }
     if (req.body.spoken != null) db.prepare("UPDATE places SET spoken = ? WHERE id = ?").run(String(req.body.spoken).trim() || null, p.id);
-    db.prepare("UPDATE places SET name = ?, address = ?, lat = ?, lng = ? WHERE id = ?").run(name, address, point?.lat ?? null, point?.lng ?? null, p.id);
-    audit(db, req.actor, "place_changed", null, { id: p.id });
-    res.json({ ok: true, found: check.found || null, warning: check.warning || null });
+    db.prepare("UPDATE places SET name = ?, address = ?, code = ?, lat = ?, lng = ? WHERE id = ?").run(name, address, code.code, point?.lat ?? null, point?.lng ?? null, p.id);
+    audit(db, req.actor, "place_changed", null, { id: p.id, ...(code.code !== p.code ? { code: code.code } : {}) });
+    const shared = code.code !== p.code && code.sharedWith?.length ? `Code ${code.code} is also used by ${code.sharedWith.join(", ")}; callers hear the names and choose.` : null;
+    res.json({ ok: true, code: code.code, found: check.found || null, warning: [check.warning, shared].filter(Boolean).join(" ") || null });
   });
   admin.delete("/places/:id", (req, res) => {
     db.prepare("UPDATE places SET active = 0 WHERE id = ?").run(req.params.id);
