@@ -21,7 +21,7 @@ const CANCELLABLE = ["pending", "proposed", "accepted"];
 const TRIES = 2;
 // What "#" means at each question: the usual answer. Questions that book or cancel need a real key.
 const SKIP = {
-  who: "1", with: "0", extra: "2", extra_men: "0", extra_women: "0", men: "0", women: "0", together: "2",
+  who: "1", more: "0", with: "0", extra: "2", extra_men: "0", extra_women: "0", men: "0", women: "0", together: "2",
   from: "1", to: "1", from_keep: "2", to_keep: "2", when: "1", ret: "2", reminder_in: "2",
 };
 const CODE_KEYS = MAX_CODE_DIGITS;
@@ -29,6 +29,9 @@ const CODE_KEYS = MAX_CODE_DIGITS;
 // usual 15 minutes; and the "#" tip (P67) is said only until a phone has booked a few rides.
 const WINDOW = 15;
 const TIP_BOOKINGS = 3;
+// The short way (Shloime, 2026-11-12: "quick, easy, simple; the advanced options behind a choice for more"): who (only
+// on a family's phone), from, to, when, then the read-back. Everything else (more people, a ride back, someone else)
+// is under "more options" at the read-back, and each of those comes back to the read-back.
 
 const P = (code) => ({ prompt: code });
 
@@ -161,7 +164,10 @@ function messagesSpeech(c) {
 }
 
 // ---------- incoming ----------
+// The main menu says book, my rides, cancel and "0 for more"; the more menu says hours, messages, add an address.
+// Both take every key.
 const MENU = [P("P04")];
+const MORE_MENU = [P("P68")];
 
 async function inbound(c) {
   const phone = approvedPhone(c.db, c.from);
@@ -203,6 +209,7 @@ function placeList(c) {
 const Q = {
   menu: () => MENU,
   who: () => [P("P06")],
+  more: () => [P("P69")],
   men: () => [P("P08")],
   women: () => [P("P09")],
   with: () => [P("P61")],
@@ -270,7 +277,24 @@ function namedCount(c, g) {
 function afterPeople(c) {
   const d = c.st.draft;
   if (d.men && d.women && !allMayMix(c)) return ask("together", Q.together());
-  return ask("from", Q.from());
+  return onward(c, "from");
+}
+// After a question: the next one on the short way, or back to the read-back when it came from "more options".
+function onward(c, next) {
+  if (c.st.draft?.editing) return ask("confirm", readBack(c));
+  return ask(next, Q[next]());
+}
+// Who rides: a phone of one person books that person; a family's phone picks a name; a family with nobody entered
+// just says how many men and women.
+function startRide(c) {
+  const d = c.st.draft;
+  if (c.phone.passenger_id) {
+    d.passengerId = c.phone.passenger_id;
+    setPeople(c, 0, 0);
+    return null;
+  }
+  if (members(c).length) return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
+  return ask("men", Q.men());
 }
 function allMayMix(c) {
   const d = c.st.draft;
@@ -290,6 +314,10 @@ function setPeople(c, extraMen, extraWomen) {
   d.women = namedCount(c, "f") + extraWomen;
 }
 
+function toReadBack(c) {
+  c.st.draft.returnMinute ??= null;
+  return ask("confirm", readBack(c));
+}
 function readBack(c) {
   const d = c.st.draft;
   const named = namedIds(d).map((id) => passenger(c, id)).filter(Boolean);
@@ -369,7 +397,13 @@ const STEPS = {
       c.st.draft = { men: 0, women: 0 };
       // The "#" tip only for a phone's first few bookings: after that the caller knows it, and it is one less thing to hear.
       const booked = c.db.prepare("SELECT count(*) AS n FROM bookings WHERE booked_by_phone = ?").get(c.phone.number).n;
-      return ask("who", [booked < TIP_BOOKINGS ? P("P67") : null, Q.who()]);
+      const tip = booked < TIP_BOOKINGS ? P("P67") : null;
+      const first = startRide(c) || ask("from", Q.from());
+      return { ...first, play: [tip, first.play] };
+    }
+    if (c.keys === "0") {
+      settle(c, "menu");
+      return ask("menu", MORE_MENU);
     }
     if (c.keys === "6") {
       settle(c, "menu");
@@ -388,6 +422,25 @@ const STEPS = {
     if (c.keys === "9") return ask("menu", MENU);
     return retry(c, "menu", MENU);
   },
+  // "More options" at the read-back: 1 more people, 2 a ride back, 3 for someone else, 0 back to the read-back.
+  more(c) {
+    const d = c.st.draft;
+    if (!d) return ask("menu", MENU);
+    d.editing = true;
+    if (c.keys === "0") return ask("confirm", readBack(c));
+    if (c.keys === "1") {
+      d.with = [];
+      d.choices = null;
+      if (!namedIds(d).length) return ask("men", Q.men());
+      return askWith(c);
+    }
+    if (c.keys === "2") return ask("ret_time", Q.ret_time(), 4);
+    if (c.keys === "3") {
+      if (!members(c).length) return ask("men", Q.men());
+      return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
+    }
+    return retry(c, "more", Q.more());
+  },
   who(c) {
     if (c.keys === "1" || (c.keys === "2" && !members(c).length)) {
       c.st.draft.passengerId = c.phone.passenger_id || null;
@@ -400,8 +453,12 @@ const STEPS = {
     const list = members(c);
     const p = list[Number(c.keys) - 1];
     if (!p) return retry(c, "who_pick", whoPick(c), list.length > 9 ? 2 : 1);
-    c.st.draft.passengerId = p.id;
-    return askWith(c);
+    const d = c.st.draft;
+    d.passengerId = p.id;
+    d.with = (d.with || []).filter((id) => id !== p.id);
+    d.choices = null;
+    setPeople(c, d.extraMen || 0, d.extraWomen || 0);
+    return onward(c, "from");
   },
   with(c) {
     const d = c.st.draft;
@@ -452,12 +509,12 @@ const STEPS = {
     if (n + c.st.draft.men === 0) return retry(c, "men", Q.men());
     c.st.draft.women = n;
     if (c.st.draft.men && n) return ask("together", Q.together());
-    return ask("from", Q.from());
+    return onward(c, "from");
   },
   together(c) {
     if (!["1", "2"].includes(c.keys)) return retry(c, "together", Q.together());
     c.st.draft.together = c.keys === "1";
-    return ask("from", Q.from());
+    return onward(c, "from");
   },
   from: (c) => pickPlace(c, "from", "to"),
   from_code: (c) => placeCode(c, "from", "to"),
@@ -476,7 +533,7 @@ const STEPS = {
       if (!fitsToday(c, today(c).minute)) return end([hoursToday(c)]);
       c.st.draft.pickupMinute = null;
       c.st.draft.window = WINDOW;
-      return ask("ret", Q.ret());
+      return toReadBack(c);
     }
     if (c.keys === "2") return ask("time", Q.time(), 4);
     return retry(c, "when", Q.when());
@@ -487,7 +544,7 @@ const STEPS = {
     if (!fitsToday(c, m)) return retryBecause(c, "time", hoursToday(c), Q.time(), 4);
     c.st.draft.pickupMinute = m;
     c.st.draft.window = WINDOW;
-    return ask("ret", Q.ret());
+    return toReadBack(c);
   },
   ret(c) {
     if (c.keys === "1") return ask("ret_time", Q.ret_time(), 4);
@@ -504,12 +561,17 @@ const STEPS = {
     c.st.draft.returnMinute = m;
     return ask("confirm", readBack(c));
   },
+  // The read-back: 1 book it, 2 more options, 3 start over.
   confirm(c) {
     if (!c.st.draft) return ask("menu", MENU);
     if (c.keys === "1") return book(c);
     if (c.keys === "2") {
+      settle(c, "confirm");
+      return ask("more", Q.more());
+    }
+    if (c.keys === "3") {
       c.st.draft = { men: 0, women: 0 };
-      return ask("who", Q.who());
+      return startRide(c) || ask("from", Q.from());
     }
     return retry(c, "confirm", readBack(c));
   },

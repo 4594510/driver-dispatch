@@ -16,6 +16,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   name who is coming from their family and relatives on the phone; men/women still count everyone.
 - Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows (the phone no longer asks: always 15,
   P17 unused), max 30 minutes driving. The "#" tip (P67) is said only for a phone's first 3 bookings.
+- Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): who (only on a family's phone), from,
+  to, when, read-back. More people, a ride back and someone else are under "more options" (2 at the read-back, P69).
+  Main menu: 1 book, 2 my rides, 3 cancel, 0 more (4 hours, 5 messages, 6 add an address; P68). P06 and P18 unused.
+- Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
+  rides on the Now screen with "Take it" / "Can't", one big button per stop.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
@@ -32,16 +37,16 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-  Key 3 at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
+  Key 3 at "from"/"to" (still taken, no longer said) is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
   spoken step; also code 100), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
   or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
 - src/places.js: saved addresses, shared by everyone for now (codes unique across all places, 1-6 digits, default the
   house number, 100 reserved). src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P67 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P69 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P67 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P69 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
@@ -53,14 +58,14 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   WebView + TrackingService for GPS and request notifications), built by .github/workflows/android.yml.
 - src/backup.js: the daily database copy. Dockerfile, railway.json, docs/going-live.md: hosting and the pilot.
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/. A phone
-  belongs to a whole family or to one person in it (phones.passenger_id); "for myself" on the phone books that person.
+  belongs to a whole family or to one person in it (phones.passenger_id); a person's own phone books that person without asking.
 - src/auth.js: admin logins (scrypt passwords, hashed session tokens). First admin from ADMIN_EMAIL/ADMIN_PASSWORD.
 - src/relations.js: relations and seat rules between people (relations table), the riders named on a ride
   (bookings.riders), and who a phone may name (its family and their relatives). Rules reach seating.js on each ride's
   people.
 - src/settings.js: hours, areas, trip limit stored in the database. getSettings(db, now) puts today's schedule in.
 - src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
-  wins), set by the driver app (Hours tab) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).
+  wins), set by the driver app (More, My hours) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).
 - src/priority.js: priority levels (Normal, High, Top) an admin sets for a family or one person, always or for a
   local time range. Used by dispatch.js: the driver's requests are sorted by it, the accept preview warns when a ride
   would leave no room for a waiting higher-priority one, and the planner weighs higher-priority waiting more. It never

@@ -1,4 +1,4 @@
-// Make the fixed prompts (P01 to P67) with the Yiddish Tools voice, one WAV per code, to upload to Fonory.
+// Make the fixed prompts (P01 to P69) with the Yiddish Tools voice, one WAV per code, to upload to Fonory.
 //   YIDDISH_TOOLS_API_KEY=... node scripts/make-recordings.mjs [--out recordings/prompts] [--only P01,P27b] [--force]
 // YT_VOICE picks the voice (default shloimy; a cloned voice is custom:<id>), YT_SPEED slow / normal / fast.
 // Existing files are kept unless --force, so a changed line is remade with --only <code> --force.
