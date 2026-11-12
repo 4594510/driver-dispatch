@@ -118,7 +118,7 @@ test("days are said from today: tomorrow, a weekday, or the date", () => {
 test("phone: on a closed day callers hear it at once, and can't start a booking", async () => {
   const db = setup();
   add(db, { from: "2026-11-11", closed: true });
-  const r = await call(db, ["1"]);
+  const r = await call(db, ["1", "1"]);
   assert.deepEqual(prompts(r[0]), ["P01", "P49", "P04"]);
   assert.deepEqual(prompts(r[1]), ["P49", "P04"]);
 });
@@ -127,7 +127,7 @@ test("phone: other hours today are said at the start; a time outside them is ref
   const db = setup();
   add(db, { from: "2026-11-11", openMinute: 600, closeMinute: 840 });
   // 1 order (his own phone), 0 from home, 20 to the shul, 2 later, 0330 (past 2 PM)
-  const r = await call(db, ["1", "0", "20", "2", "0330"]);
+  const r = await call(db, ["1", "1", "0", "20", "2", "0330"]);
   assert.deepEqual(prompts(r[0]), ["P01", "P48", "P04"]);
   assert.deepEqual(said(r[0]), ["צען", "אינדערפרי", "ביז", "צוויי", "נאכמיטאג"]);
   const refused = r[r.length - 1];
