@@ -22,9 +22,13 @@ const TRIES = 2;
 // What "#" means at each question: the usual answer. Questions that book or cancel need a real key.
 const SKIP = {
   who: "1", with: "0", extra: "2", extra_men: "0", extra_women: "0", men: "0", women: "0", together: "2",
-  from: "1", to: "1", from_keep: "2", to_keep: "2", when: "1", window: "1", ret: "2", reminder_in: "2",
+  from: "1", to: "1", from_keep: "2", to_keep: "2", when: "1", ret: "2", reminder_in: "2",
 };
 const CODE_KEYS = MAX_CODE_DIGITS;
+// Fewer questions (feedback 2026-11-11: "too many steps"): the pickup window is no longer asked, every ride gets the
+// usual 15 minutes; and the "#" tip (P67) is said only until a phone has booked a few rides.
+const WINDOW = 15;
+const TIP_BOOKINGS = 3;
 
 const P = (code) => ({ prompt: code });
 
@@ -214,7 +218,6 @@ const Q = {
   when: () => [P("P15")],
   time: () => [P("P16")],
   ret_time: () => [P("P16")],
-  window: () => [P("P17")],
   ret: () => [P("P18")],
   rides_menu: () => [P("P35")],
   change_which: () => [P("P47")],
@@ -364,7 +367,9 @@ const STEPS = {
       settle(c, "menu");
       if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
       c.st.draft = { men: 0, women: 0 };
-      return ask("who", [P("P67"), Q.who()]);
+      // The "#" tip only for a phone's first few bookings: after that the caller knows it, and it is one less thing to hear.
+      const booked = c.db.prepare("SELECT count(*) AS n FROM bookings WHERE booked_by_phone = ?").get(c.phone.number).n;
+      return ask("who", [booked < TIP_BOOKINGS ? P("P67") : null, Q.who()]);
     }
     if (c.keys === "6") {
       settle(c, "menu");
@@ -470,7 +475,8 @@ const STEPS = {
     if (c.keys === "1") {
       if (!fitsToday(c, today(c).minute)) return end([hoursToday(c)]);
       c.st.draft.pickupMinute = null;
-      return ask("window", Q.window());
+      c.st.draft.window = WINDOW;
+      return ask("ret", Q.ret());
     }
     if (c.keys === "2") return ask("time", Q.time(), 4);
     return retry(c, "when", Q.when());
@@ -480,11 +486,7 @@ const STEPS = {
     if (m == null) return retry(c, "time", Q.time(), 4);
     if (!fitsToday(c, m)) return retryBecause(c, "time", hoursToday(c), Q.time(), 4);
     c.st.draft.pickupMinute = m;
-    return ask("window", Q.window());
-  },
-  window(c) {
-    if (!["1", "2"].includes(c.keys)) return retry(c, "window", Q.window());
-    c.st.draft.window = c.keys === "1" ? 15 : 30;
+    c.st.draft.window = WINDOW;
     return ask("ret", Q.ret());
   },
   ret(c) {

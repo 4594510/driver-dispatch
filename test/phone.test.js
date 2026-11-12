@@ -66,8 +66,8 @@ test("booking a ride by phone, from the greeting to the driver", async () => {
   const db = setup();
   const sent = [];
   // 1 order, 2 someone else, 2 Rivka, 0 nobody else from the list, 1 others too, 0 men, 1 woman, 1 from home, 2 other
-  // place, code 20, 2 later, 1200, 1 = 15 min, 2 no return, 1 correct.
-  const r = await call(db, ["1", "2", "2", "0", "1", "0", "1", "1", "2", "20", "2", "1200", "1", "2", "1"], { extra: { notify: (b, k) => sent.push(k) } });
+  // place, code 20, 2 later, 1200,  2 no return, 1 correct.
+  const r = await call(db, ["1", "2", "2", "0", "1", "0", "1", "1", "2", "20", "2", "1200", "2", "1"], { extra: { notify: (b, k) => sent.push(k) } });
   assert.deepEqual(prompts(r[0]), ["P01", "P04"]);
   assert.deepEqual(prompts(r[2]), ["P07"]);
   assert.ok(said(r[2]).includes("רבקה"), "names are read out");
@@ -90,12 +90,12 @@ test("booking a ride by phone, from the greeting to the driver", async () => {
 test("men and women together are asked about; a full van offers the next time", async () => {
   const db = setup();
   // Moshe and 6 other women.
-  const big = (await call(db, ["1", "1", "0", "1", "0", "6", "1", "1", "2", "20", "2", "1200", "1", "2", "1"], { id: "a" }));
+  const big = (await call(db, ["1", "1", "0", "1", "0", "6", "1", "1", "2", "20", "2", "1200", "2", "1"], { id: "a" }));
   assert.deepEqual(prompts(big[6]), ["P10"]);
   const b = db.prepare("SELECT * FROM bookings").get();
   await acceptRide(db, travel, b.id, "drv1", settings, now);
   // Rivka alone.
-  const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"], { id: "b" });
+  const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "2", "1"], { id: "b" });
   const offer = r[r.length - 1];
   assert.deepEqual(prompts(offer), ["P23", "P27", "P27b"]);
   const take = await phoneStep(ctx(db), { call_id: "b", from: "8455550001", step: offer.gather.step, keys: "1" });
@@ -114,7 +114,7 @@ test("wrong keys are asked again, and twice wrong says goodbye", async () => {
 
 test("my rides lists today's rides, and a ride can be cancelled by phone", async () => {
   const db = setup();
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"], { id: "a" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "2", "1"], { id: "a" });
   const list = await call(db, ["2"], { id: "b" });
   assert.deepEqual(prompts(list[1]), ["P29", "P31", "P30b", "P35"]);
   const cancel = await call(db, ["3", "1", "1"], { id: "c" });
@@ -127,7 +127,7 @@ test("my rides lists today's rides, and a ride can be cancelled by phone", async
 test("the pickup place can be changed by phone only more than 30 minutes ahead", async () => {
   const db = setup();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('store', NULL, '21', 'Store', '3 Other St', 46, -74)").run();
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"], { id: "a" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "2", "1"], { id: "a" });
   const r = await call(db, ["2", "2", "21"], { id: "b" });
   assert.deepEqual(prompts(r[3]), ["P46", "P04"]);
   assert.equal(db.prepare("SELECT pickup_place_id FROM bookings").get().pickup_place_id, "store");
@@ -138,13 +138,13 @@ test("the pickup place can be changed by phone only more than 30 minutes ahead",
 test("a place with a 3-digit code is picked by phone", async () => {
   const db = setup();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('store', NULL, '123', 'Store', '3 Other St', 46, -74)").run();
-  await call(db, ["1", "1", "0", "2", "1", "2", "123", "2", "1200", "1", "2", "1"], { id: "a" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "123", "2", "1200", "2", "1"], { id: "a" });
   assert.equal(db.prepare("SELECT dropoff_place_id FROM bookings").get().dropoff_place_id, "store");
 });
 
 test("messages: queued by the phone's setting, sent through Fonory, retried when unanswered", async () => {
   const db = setup();
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1015", "1", "2", "1"], { id: "a" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1015", "2", "1"], { id: "a" });
   const b = db.prepare("SELECT * FROM bookings").get();
   await acceptRide(db, travel, b.id, "drv1", settings, now);
   assert.equal(notifyBooking(db, getBooking(db, b.id), "accepted", {}, now.toISOString()), 2);
@@ -184,7 +184,7 @@ test("messages: queued by the phone's setting, sent through Fonory, retried when
 
 test("outgoing calls: the reminder takes 1 or 2, a time change is agreed by phone", async () => {
   const db = setup();
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"], { id: "a" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "2", "1"], { id: "a" });
   const b = db.prepare("SELECT * FROM bookings").get();
   await acceptRide(db, travel, b.id, "drv1", settings, now);
   notifyBooking(db, getBooking(db, b.id), "reminder");
@@ -197,7 +197,7 @@ test("outgoing calls: the reminder takes 1 or 2, a time change is agreed by phon
   assert.equal(getBooking(db, b.id).confirmed_by_passenger, 1);
 
   // A second ride: the driver offers 12:30 instead of 12:00 and the caller agrees.
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "0100", "1", "2", "1"], { id: "c" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "0100", "2", "1"], { id: "c" });
   const p = db.prepare("SELECT * FROM bookings WHERE pickup_minute = 780").get();
   db.prepare("UPDATE bookings SET status = 'proposed', proposed_minute = 810, driver_id = 'drv1' WHERE id = ?").run(p.id);
   notifyBooking(db, getBooking(db, p.id), "time_change", { oldMinute: 780, newMinute: 810 });
@@ -245,18 +245,18 @@ test("Yiddish Tools WAVs get their real sizes and the shloimy voice", async () =
 test("with the driver offline, the caller hears the ride waits unconfirmed", async () => {
   const db = setup();
   db.prepare("UPDATE drivers SET status = 'offline'").run();
-  const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"]);
+  const r = await call(db, ["1", "2", "2", "0", "2", "1", "2", "20", "2", "1200", "2", "1"]);
   assert.deepEqual(prompts(r[r.length - 1]), ["P22", "P41"]);
 });
 
 test("a caller is known by a family's phone or one person's phone; 'for myself' means that person", async () => {
   const db = setup();
   db.prepare("INSERT INTO phones (number, household_id, passenger_id, notify) VALUES ('+18455550002', 'hh1', NULL, 'both')").run();
-  // 1 order, 1 for myself, 0 nobody else, 2 no others, 1 from home, 2 other place, code 20, 2 later, 1200, 1 = 15 min,
+  // 1 order, 1 for myself, 0 nobody else, 2 no others, 1 from home, 2 other place, code 20, 2 later, 1200, 
   // 2 no return, 1 correct.
-  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "1", "2", "1"], { from: "8455550001", id: "me1" });
+  await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200", "2", "1"], { from: "8455550001", id: "me1" });
   // The family's phone names nobody: then just 1 man, 0 women.
-  await call(db, ["1", "1", "0", "1", "0", "1", "2", "20", "2", "1230", "1", "2", "1"], { from: "845-555-0002", id: "me2" });
+  await call(db, ["1", "1", "0", "1", "0", "1", "2", "20", "2", "1230", "2", "1"], { from: "845-555-0002", id: "me2" });
   const rows = db.prepare("SELECT booked_by_phone, household_id, passenger_id FROM bookings ORDER BY pickup_minute").all().map((r) => ({ ...r }));
   assert.deepEqual(rows, [
     { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1" },
@@ -315,7 +315,7 @@ test("a one-time address: key 3, said out loud, found on the map, read back in E
   let last = await step("from_keep", { keys: "2" });
   assert.equal(last.gather.step, "to");
   // To the shul (code 20), later at 12:00, 15 minutes, no return.
-  for (const keys of ["2", "20", "2", "1200", "1", "2"]) last = await step(last.gather.step, { keys });
+  for (const keys of ["2", "20", "2", "1200", "2"]) last = await step(last.gather.step, { keys });
   assert.ok(said(last).includes("12 Main Street, Monsey"), "the read-back says the address");
   const done = await step(last.gather.step, { keys: "1" });
   assert.deepEqual(prompts(done), ["P21", "P41"]);
@@ -342,8 +342,8 @@ test("a one-time address not found three times goes back to choosing a place", a
 test("the caller says who is coming: people from the list, then others not on it", async () => {
   const db = setup();
   // 1 order, 1 for myself (Moshe), 1 add Rivka (the list is then empty), 1 others too, 2 men, 0 women, 1 may sit
-  // together, 1 from home, 2 other place, 20, 2 later, 1200, 1 = 15 min, 2 no return, 1 correct.
-  const r = await call(db, ["1", "1", "1", "1", "2", "0", "1", "1", "2", "20", "2", "1200", "1", "2", "1"]);
+  // together, 1 from home, 2 other place, 20, 2 later, 1200,  2 no return, 1 correct.
+  const r = await call(db, ["1", "1", "1", "1", "2", "0", "1", "1", "2", "20", "2", "1200", "2", "1"]);
   assert.deepEqual(prompts(r[2]), ["P60", "P61"]);
   assert.ok(said(r[2]).includes("רבקה"), "the list is read out");
   assert.ok(!said(r[2]).includes("משה"), "the caller himself is not on the list");
@@ -425,8 +425,8 @@ test("code 100 means saying a new address, and menu key 6 just adds one", async 
 test("# skips a question with the usual answer", async () => {
   const db = setup();
   // Order, then # at every question: for myself, nobody else, no others, from home; to the shul (2, 20); # = now,
-  // # = 15 minutes, # = no return.
-  const r = await call(db, ["1", "#", "#", "#", "#", "2", "20", "#", "#", "#"]);
+  // # = no return.
+  const r = await call(db, ["1", "#", "#", "#", "#", "2", "20", "#", "#"]);
   const readBack = r.at(-1);
   assert.equal(readBack.gather.step, "confirm");
   const d = JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = 'c1'").get().state).draft;
@@ -441,4 +441,23 @@ test("# skips a question with the usual answer", async () => {
   const a = await call(db2, ["1"], { id: "t" });
   const s = await phoneStep(ctx(db2), { call_id: "t", from: "8455550001", step: a.at(-1).gather.step, keys: "", terminated_by: "#" });
   assert.notEqual(s.gather.step, "who");
+});
+
+test("fewer questions: no window question (15 minutes), and the # tip only for a phone's first bookings", async () => {
+  const db = setup();
+  // Order, for myself, nobody else, no others, from home, to the shul, later at 12:00: next comes the return question.
+  const r = await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "1200"]);
+  assert.deepEqual(prompts(r[1]), ["P67", "P06"]);
+  assert.deepEqual(prompts(r.at(-1)), ["P18"]);
+  assert.ok(!r.some((x) => prompts(x).includes("P17")), "the window is not asked");
+  const d = JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = 'c1'").get().state).draft;
+  assert.equal(d.window, 15);
+  // "Now" skips the window too.
+  const now1 = await call(db, ["1", "1", "0", "2", "1", "2", "20", "1"], { id: "n" });
+  assert.deepEqual(prompts(now1.at(-1)), ["P18"]);
+  // After three bookings the tip is left out.
+  for (const [i, t] of ["1100", "0100", "0300"].entries()) await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", t, "2", "1"], { id: `b${i}` });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM bookings").get().n, 3);
+  const later = await call(db, ["1"], { id: "late" });
+  assert.deepEqual(prompts(later[1]), ["P06"]);
 });
