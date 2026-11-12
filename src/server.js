@@ -328,7 +328,9 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const r = savePlace(db, { householdId, code, kind, name, address, spoken: String(req.body.spoken || "").trim() || null,
       lat: check.point?.lat, lng: check.point?.lng }, req.actor);
     if (!r.ok) return bad(res, r.error);
-    res.json({ ok: true, id: r.id, code: r.code, found: check.found || null, warning: check.warning || null });
+    // A code another place also has is fine: callers pressing it hear both names and choose (their own family's first).
+    const shared = r.sharedWith?.length ? `Code ${r.code} is also used by ${r.sharedWith.join(", ")}. Callers pressing it hear the names and choose; a family's own place comes first for that family.` : null;
+    res.json({ ok: true, id: r.id, code: r.code, found: check.found || null, warning: [check.warning, shared].filter(Boolean).join(" ") || null });
   });
   admin.patch("/places/:id", async (req, res) => {
     const p = db.prepare("SELECT * FROM places WHERE id = ?").get(req.params.id);

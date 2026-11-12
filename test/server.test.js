@@ -64,7 +64,11 @@ test("families, phones and places are managed, with place codes kept unique per 
     assert.equal((await call("/api/admin/passengers", "POST", { householdId: hh, name: "Rider", gender: "x" })).status, 400);
     assert.equal((await call("/api/admin/passengers", "POST", { householdId: hh, name: "Rider", gender: "f" })).status, 200);
     assert.equal((await call("/api/admin/places", "POST", { code: "20", name: "Shul", address: "5 Sample Rd" })).status, 200);
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "20", name: "Home", address: "1 Example Ln" })).status, 400, "code used by a shared place");
+    const both = await call("/api/admin/places", "POST", { householdId: hh, code: "20", name: "Work", address: "1 Example Ln" });
+    assert.equal(both.status, 200, "a code a shared place has may be shared; callers choose");
+    assert.match(both.body.warning, /also used by Shul/);
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "20", name: "X", address: "1 Example Ln" })).status, 400, "but not twice in one family");
+    await call(`/api/admin/places/${both.body.id}`, "DELETE");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "01", kind: "home", name: "Home", address: "1 Example Ln" })).status, 200);
     const list = (await call("/api/admin/households")).body;
     assert.equal(list[0].phones[0].number, "+18455550001");
@@ -238,7 +242,7 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   assert.equal(english.actions[0].language, "english");
 });
 
-test("adding a place: the code is the house number when free, any 1 to 6 digits, unique for everyone; the map checks it", async () => {
+test("adding a place: the code is the house number, any 1 to 6 digits, shared codes allowed; the map checks it", async () => {
   const lookup = async (a) => /nowhere/i.test(a) ? { status: "not_found" }
     : /^main st/i.test(a) ? { status: "found", lat: 41.1, lng: -74.05, formatted: "Main St, Monsey, NY 10952, USA", exact: false }
     : /boston/i.test(a) ? { status: "found", lat: 42.36, lng: -71.06, formatted: "Boston, MA, USA", exact: false, km: 290 }
@@ -253,14 +257,17 @@ test("adding a place: the code is the house number when free, any 1 to 6 digits,
     assert.equal(a.body.found, "12 Main St, Monsey, NY 10952, USA");
     assert.equal(a.body.warning, null);
     assert.equal(db.prepare("SELECT lat FROM places WHERE id = ?").get(a.body.id).lat, 41.11, "the map point is kept");
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh2, name: "Work", address: "12 Main St" })).body.code, "01", "house number taken: the next free code");
+    const other = await call("/api/admin/places", "POST", { householdId: hh2, name: "Home", address: "12 Main St" });
+    assert.equal(other.body.code, "12", "another family may have the same code");
+    assert.match(other.body.warning, /also used by Home/);
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, name: "Work", address: "12 Main St" })).body.code, "01", "the same family: the next free code");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "03");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "045", name: "Park", address: "12 Main St" })).body.code, "45");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234", name: "Shop", address: "12 Main St" })).body.code, "1234");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234567", name: "X", address: "12 Main St" })).status, 400, "at most 6 digits");
     assert.match((await call("/api/admin/places", "POST", { code: "100", name: "X", address: "12 Main St" })).body.error, /100 = say a new address/);
-    const taken = await call("/api/admin/places", "POST", { householdId: hh2, code: "12", name: "X", address: "12 Main St" });
-    assert.equal(taken.status, 400, "codes are shared by every family");
+    const taken = await call("/api/admin/places", "POST", { householdId: hh, code: "12", name: "X", address: "12 Main St" });
+    assert.equal(taken.status, 400, "one family can't have a code twice");
     assert.match(taken.body.error, /already used by Home\. Code 02 is free/);
     const missing = await call("/api/admin/places", "POST", { householdId: hh, name: "X", address: "Nowhere Road 99" });
     assert.equal(missing.status, 400);
@@ -272,23 +279,29 @@ test("adding a place: the code is the house number when free, any 1 to 6 digits,
   }, { travel: { geocode: async () => null, ensure: async () => {}, minutes: () => ({ minutes: 10, estimated: false }), lookup } });
 });
 
-test("Shloime's list of places is added once, shared, with its own codes; a family place in the way moves", async () => {
+test("Shloime's lists of places are added once with their codes, sharing a code where one is taken; old moves are undone", async () => {
   const { addPlaceLists, PLACE_LISTS } = await import("../src/seed.js");
+  const { audit } = await import("../src/db.js");
   const db = openDb(":memory:");
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'A', 'x')").run();
   db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '01', 'home', 'Home', '33 Elm St')").run();
-  const log = [];
-  addPlaceLists(db, PLACE_LISTS, (m) => log.push(m));
-  const byCode = (c) => db.prepare("SELECT * FROM places WHERE code = ? AND active = 1").get(c);
-  assert.equal(byCode("01").name, "Satmer");
-  assert.equal(byCode("01").household_id, null);
-  assert.equal(byCode("401").name, "Atrium");
-  assert.equal(byCode("108").address, "108 Route 306, Monsey, NY 10952");
-  assert.equal(db.prepare("SELECT code FROM places WHERE id = 'home'").get().code, "33", "the family's home moved to its house number");
-  assert.equal(db.prepare("SELECT count(*) AS n FROM places WHERE household_id IS NULL").get().n, PLACE_LISTS["places-2026-11-11"].length);
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('wal', NULL, '25', 'other', 'Walmart', '1 Rt 59')").run();
+  // What the first list did on the live server: a family place moved out of 47.
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('bob', 'hh1', '04', 'other', 'Bobby', '9 Elm St')").run();
+  audit(db, "system:list", "place_code_changed", null, { id: "bob", from: "47", to: "04" });
+  addPlaceLists(db, PLACE_LISTS, () => {});
+  const named = (n) => db.prepare("SELECT * FROM places WHERE name = ? AND active = 1").get(n);
+  assert.equal(named("Satmer").code, "01");
+  assert.equal(named("Satmer").household_id, null);
+  assert.equal(named("Home").code, "01", "the family's home keeps 1; that family's callers get it");
+  assert.equal(named("Viznitz").code, "25", "shares 25 with Walmart");
+  assert.equal(named("Weinberger").code, "40");
+  assert.equal(named("Atrium").code, "401");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM places WHERE name = 'Viznitz'").get().n, 1, "not added twice");
+  assert.equal(named("Bobby").code, "47", "the old move is undone");
   db.prepare("UPDATE places SET active = 0 WHERE code = '18'").run();
   addPlaceLists(db, PLACE_LISTS, () => {});
-  assert.ok(!byCode("18"), "a place removed later does not come back");
+  assert.ok(!named("Mottys Supermarket"), "a place removed later does not come back");
 });
 
 test("without a map key a place is saved unchecked", async () => {
