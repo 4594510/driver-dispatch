@@ -504,3 +504,27 @@ test("fewer questions: no window and no ride-back question, and the # tip only f
   const later = await call(db, ["1"], { id: "late" });
   assert.deepEqual(prompts(later[1]), ["P11"]);
 });
+
+test("a code two places share: the caller's own family's place wins, otherwise the caller picks by name", async () => {
+  const db = setup();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('wal', NULL, '25', 'Walmart', '1 Rt 59', 41, -74)").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('viz', NULL, '25', 'Viznitz', '25 Phyllis Ter', 41, -74)").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('sat', NULL, '01', 'Satmer', '1 Monsey Blvd', 41, -74)").run();
+  const st = (id) => JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = ?").get(id).state);
+  const step = (id, step, keys) => phoneStep(ctx(db), { call_id: id, from: "8455550001", step, keys });
+  // Walk to a code question, whatever the short booking asks first.
+  async function toCode(id) {
+    let r = await phoneStep(ctx(db), { call_id: id, from: "8455550001", step: "start", keys: "" });
+    for (let i = 0; i < 12 && r.gather && r.gather.step !== "from_code"; i++) r = await step(id, r.gather.step, r.gather.step === "from" ? "2" : r.gather.step === "menu" ? "1" : "#");
+    assert.equal(r.gather?.step, "from_code");
+  }
+  await toCode("a");
+  await step("a", "from_code", "1");
+  assert.equal(st("a").draft.from, "home", "1: this family's home and Satmer have it; the family's own wins");
+  await toCode("b");
+  const pick = await step("b", "from_code", "25");
+  assert.equal(pick.gather.step, "from_choose");
+  assert.deepEqual(pick.play.filter((p) => p.language === "english").map((p) => p.say), ["Viznitz", "Walmart"]);
+  await step("b", "from_choose", "1");
+  assert.equal(st("b").draft.from, "viz");
+});

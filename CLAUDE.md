@@ -40,8 +40,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   Key 3 at "from"/"to" (still taken, no longer said) is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
   spoken step; also code 100), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
   or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
-- src/places.js: saved addresses, shared by everyone for now (codes unique across all places, 1-6 digits, default the
-  house number, 100 reserved). src/seed.js: place lists Shloime gave, added once at startup.
+- src/places.js: saved addresses, usable by everyone (codes 1-6 digits, default the house number, 100 reserved). Two
+  places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
+  <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
 - src/phone/words.js: the prompt script P01-P69 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format

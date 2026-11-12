@@ -11,7 +11,7 @@ import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
 import { AREA_KM } from "../travel.js";
-import { allPlaces, placeByCode, savePlace, MAX_CODE_DIGITS, SAY_CODE } from "../places.js";
+import { allPlaces, codeMatches, savePlace, MAX_CODE_DIGITS, SAY_CODE } from "../places.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
 import { peopleForFamily } from "../relations.js";
@@ -600,16 +600,14 @@ const STEPS = {
   },
   async change_code(c) {
     if (c.keys === "0") return ask("change_code", [placeList(c), P("P13")], CODE_KEYS);
-    const place = /^\d+$/.test(c.keys) ? placeByCode(c.db, c.keys, c.phone.household_id) : null;
-    const b = getBooking(c.db, c.st.changing);
-    if (!place) return retry(c, "change_code", Q.change_code(), CODE_KEYS);
-    if (!b || !CANCELLABLE.includes(b.status) || !canChangePickup(today(c).minute, b.pickup_minute, c.settings)) return end([P("P36")]);
-    c.db.prepare(`UPDATE bookings SET pickup_place_id = ?, pickup_address = ?, pickup_lat = ?, pickup_lng = ?, updated_at = ? WHERE id = ?`)
-      .run(place.id, place.address, place.lat, place.lng, nowIso(), b.id);
-    audit(c.db, `phone:${c.from}`, "pickup_changed", b.id, { place: place.id });
-    if (b.status === "accepted") await refreshDay(c.db, c.travel, b.day, c.settings, c.now);
-    return ask("menu", [P("P46"), MENU]);
+    const matches = /^\d+$/.test(c.keys) ? codeMatches(c.db, c.keys, c.phone.household_id) : [];
+    if (!matches.length) return retry(c, "change_code", Q.change_code(), CODE_KEYS);
+    if (matches.length > 1) return askChoice(c, "change", matches);
+    return changePickup(c, matches[0]);
   },
+  from_choose: (c) => chosen(c, "from", (place) => setPlace(c, "from", place, "to")),
+  to_choose: (c) => chosen(c, "to", (place) => setPlace(c, "to", place, "when")),
+  change_choose: (c) => chosen(c, "change", (place) => changePickup(c, place)),
   cancel_which(c) {
     const b = getBooking(c.db, (c.st.list || [])[Number(c.keys) - 1]);
     if (!b || !CANCELLABLE.includes(b.status)) return retry(c, "cancel_which", Q.cancel_which(), (c.st.list || []).length > 9 ? 2 : 1);
@@ -685,12 +683,39 @@ function saveHeard(c, use = () => {}) {
   use(r.id);
   return [P("P66"), digitsOf(c, r.code)];
 }
+async function changePickup(c, place) {
+  const b = getBooking(c.db, c.st.changing);
+  if (!b || !CANCELLABLE.includes(b.status) || !canChangePickup(today(c).minute, b.pickup_minute, c.settings)) return end([P("P36")]);
+  c.db.prepare(`UPDATE bookings SET pickup_place_id = ?, pickup_address = ?, pickup_lat = ?, pickup_lng = ?, updated_at = ? WHERE id = ?`)
+    .run(place.id, place.address, place.lat, place.lng, nowIso(), b.id);
+  audit(c.db, `phone:${c.from}`, "pickup_changed", b.id, { place: place.id });
+  if (b.status === "accepted") await refreshDay(c.db, c.travel, b.day, c.settings, c.now);
+  return ask("menu", [P("P46"), MENU]);
+}
+
+// Two or more places with the pressed code (and none of them the caller's family's): read their names, press 1, 2, ...
+function askChoice(c, which, places) {
+  c.st.choices = places.slice(0, 9).map((p) => p.id);
+  return ask(`${which}_choose`, choiceList(c));
+}
+function choiceList(c) {
+  return (c.st.choices || []).map((id, i) => [c.name(placeRow(c, id)), c.say(W.press), numberOf(c, i + 1)]);
+}
+function chosen(c, which, then) {
+  const place = placeRow(c, (c.st.choices || [])[Number(c.keys) - 1]);
+  if (!place || !place.active) return retry(c, `${which}_choose`, choiceList(c));
+  settle(c, `${which}_choose`);
+  c.st.choices = null;
+  return then(place);
+}
+
 function placeCode(c, which, next) {
   if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], CODE_KEYS);
   if (normalCode(c.keys) === SAY_CODE) return listen(`${which}_say`, [P("P56")]); // 100: say a new address
-  const place = /^\d+$/.test(c.keys) ? placeByCode(c.db, c.keys, c.phone.household_id) : null;
-  if (!place) return retry(c, `${which}_code`, Q[`${which}_code`](), CODE_KEYS);
-  return setPlace(c, which, place, next);
+  const matches = /^\d+$/.test(c.keys) ? codeMatches(c.db, c.keys, c.phone.household_id) : [];
+  if (!matches.length) return retry(c, `${which}_code`, Q[`${which}_code`](), CODE_KEYS);
+  if (matches.length > 1) return askChoice(c, which, matches);
+  return setPlace(c, which, matches[0], next);
 }
 function setPlace(c, which, place, next) {
   if (which === "to" && place.id === c.st.draft.from) return retry(c, "to", Q.to());
