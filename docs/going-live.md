@@ -49,7 +49,7 @@ Teltech's format: https://ivr.teltech.info/developers/api-box/ride-line/ (src/ph
 Use 2 or 3 phones added as a test family. Go through each, and note anything that sounds or looks wrong:
 
 - Call in from an unknown number: hears "not registered".
-- Book for yourself and for someone else; from home and from a place code; now and later; 15 and 30 minute windows;
+- Book for yourself and for someone else; from home and from a place code; now and later; the 15 minute window (not asked any more);
   with a return trip.
 - Book when the van would be full at that time: hears the next time that fits, presses 1 to take it.
 - Driver offline: the caller hears the ride waits unconfirmed. Driver online: "sent to the driver", the phone rings

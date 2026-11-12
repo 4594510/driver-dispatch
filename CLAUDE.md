@@ -14,7 +14,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Relations (dashboard, Families tab): two people's relation plus a seat rule: "may sit next to each other" (that man
   and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). Callers
   name who is coming from their family and relatives on the phone; men/women still count everyone.
-- Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows, max 30 minutes driving.
+- Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows (the phone no longer asks: always 15,
+  P17 unused), max 30 minutes driving. The "#" tip (P67) is said only for a phone's first 3 bookings.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
