@@ -164,10 +164,7 @@ function messagesSpeech(c) {
 }
 
 // ---------- incoming ----------
-// The main menu says book, my rides, cancel and "0 for more"; the more menu says hours, messages, add an address.
-// Both take every key.
 const MENU = [P("P04")];
-const MORE_MENU = [P("P68")];
 
 async function inbound(c) {
   const phone = approvedPhone(c.db, c.from);
@@ -400,10 +397,6 @@ const STEPS = {
       const tip = booked < TIP_BOOKINGS ? P("P67") : null;
       const first = startRide(c) || ask("from", Q.from());
       return { ...first, play: [tip, first.play] };
-    }
-    if (c.keys === "0") {
-      settle(c, "menu");
-      return ask("menu", MORE_MENU);
     }
     if (c.keys === "6") {
       settle(c, "menu");
