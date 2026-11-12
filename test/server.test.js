@@ -197,7 +197,7 @@ test("Teltech's requests and our answers translate both ways", () => {
     { action: "play", file: `${base}/prompts/P19.wav` },
     { action: "play", file: `${base}/audio/clips/ab.wav` },
     { action: "say", text: "צוויי", language: "yiddish" },
-    { action: "gather", max_digits: 4, timeout: 6000, tries: 1, terminator: "#", action_url: `${base}/fonory/step?step=time` },
+    { action: "gather", max_digits: 4, timeout: 6000, tries: 1, terminator: "#", digit_timeout: 3000, action_url: `${base}/fonory/step?step=time` },
   ]);
   assert.deepEqual(toActions({ play: [{ prompt: "P41" }], hangup: true }, base, { FONORY_PROMPTS: "uploaded" }).actions,
     [{ action: "play", file: "P41.wav" }, { action: "hangup" }]);

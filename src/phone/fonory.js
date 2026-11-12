@@ -108,7 +108,8 @@ export function toActions(res, base, env = process.env) {
       max_digits: g.max_keys || 1,
       timeout: (g.timeout_s || 6) * 1000,
       tries: 1,
-      ...(g.max_keys > 1 ? { terminator: "#" } : {}),
+      // Several keys: # sends them, or 3 seconds after the last key.
+      ...(g.max_keys > 1 ? { terminator: "#", digit_timeout: 3000 } : {}),
       action_url: `${base}/fonory/step?step=${encodeURIComponent(g.step)}`,
     });
   } else actions.push({ action: "hangup" });
