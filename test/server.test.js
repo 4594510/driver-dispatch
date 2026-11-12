@@ -353,3 +353,38 @@ test("relations and seat rules are added, listed and removed; a phone's people i
     assert.equal((await call("/api/admin/relations")).body.relations.length, 0);
   });
 });
+
+test("editing a place can change its code, with the same rules as adding", async () => {
+  await withServer(async (call, db) => {
+    await signIn(call);
+    const hh = (await call("/api/admin/households", "POST", { name: "Family" })).body.id;
+    const home = (await call("/api/admin/places", "POST", { householdId: hh, code: "5", name: "Home", address: "5 Elm St" })).body;
+    const shop = (await call("/api/admin/places", "POST", { householdId: hh, code: "7", name: "Shop", address: "7 Elm St" })).body;
+    await call("/api/admin/places", "POST", { code: "250", name: "Shul", address: "1 Main St" });
+    assert.match((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "5" })).body.error, /already used by Home/);
+    assert.equal((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "100" })).status, 400);
+    assert.equal((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "12a" })).status, 400);
+    const r = await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "250", name: "Store" });
+    assert.equal(r.status, 200);
+    assert.match(r.body.warning, /also used by Shul/);
+    const p = db.prepare("SELECT * FROM places WHERE id = ?").get(shop.id);
+    assert.equal(p.code, "250");
+    assert.equal(p.name, "Store");
+    assert.equal((await call(`/api/admin/places/${home.id}`, "PATCH", { name: "Home" })).body.code, "05", "no code sent: kept");
+  });
+});
+
+test("code fixes: Walmart to 250 and Dr Lebowitz to 400, once; a removed one comes back", async () => {
+  const { fixCodes } = await import("../src/seed.js");
+  const db = openDb(":memory:");
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, active) VALUES ('w', NULL, '25', 'other', 'Walmart', '250 Rt 59', 0)").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('d', NULL, '40', 'other', 'Dr lebowitz', '9 Main St')").run();
+  const log = [];
+  fixCodes(db, { "t": [["walmart", "250"], ["dr lebowitz", "400"], ["nobody", "9"]] }, (m) => log.push(m));
+  assert.deepEqual({ ...db.prepare("SELECT code, active FROM places WHERE id = 'w'").get() }, { code: "250", active: 1 });
+  assert.equal(db.prepare("SELECT code FROM places WHERE id = 'd'").get().code, "400");
+  assert.ok(log.some((m) => /no place named nobody/.test(m)));
+  db.prepare("UPDATE places SET code = '41' WHERE id = 'd'").run();
+  fixCodes(db, { "t": [["dr lebowitz", "400"]] }, () => {});
+  assert.equal(db.prepare("SELECT code FROM places WHERE id = 'd'").get().code, "41", "runs once");
+});

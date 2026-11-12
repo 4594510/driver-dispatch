@@ -385,7 +385,7 @@ async function families() {
         <div class="fam-body">
         <div class="row fam-tools"><button class="ghost" data-act="rename">Rename</button> <button class="danger" data-act="remove-fam">Remove family</button></div>
         <h3>People</h3>
-        <table><tbody>${h.passengers.map((p) => `<tr data-ps="${esc(p.id)}"><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${p.gender === "m" ? "Man" : "Woman"}</td><td class="quiet">${esc(p.notes)}</td>
+        <table><tbody>${h.passengers.map((p) => `<tr data-ps="${esc(p.id)}" data-item="${esc(JSON.stringify({ name: p.name, spoken: p.spoken || "", gender: p.gender, notes: p.notes || "" }))}"><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${p.gender === "m" ? "Man" : "Woman"}</td><td class="quiet">${esc(p.notes)}</td>
           <td class="actions"><button class="ghost" data-act="edit-ps">Edit</button><button class="danger" data-act="remove-ps">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">No one yet.</td></tr>'}</tbody></table>
         <details class="add"><summary>+ Add a person</summary><form class="row" data-form="ps"><label>Name <input name="name" required></label>
           <label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>
@@ -487,17 +487,10 @@ async function families() {
     if (a === "remove-pri" && confirm("Remove this priority?")) done = await act(() => api(`/api/admin/priorities/${pri}`, { method: "DELETE" }), "Removed");
     if (a === "rename") { const n = prompt("New family name"); if (n) done = await act(() => api(`/api/admin/households/${hh}`, { method: "PATCH", body: { name: n } })); }
     if (a === "remove-fam" && confirm("Remove this family and all its phones?")) done = await act(() => api(`/api/admin/households/${hh}`, { method: "DELETE" }));
-    if (a === "edit-ps") {
-      const spoken = prompt("Name in Yiddish, as the phone says it (empty = keep)");
-      const notes = prompt("Notes for the driver (empty = keep)");
-      const body = {};
-      if (spoken) body.spoken = spoken;
-      if (notes) body.notes = notes;
-      if (Object.keys(body).length) done = await act(() => api(`/api/admin/passengers/${ps}`, { method: "PATCH", body }));
-    }
+    if (a === "edit-ps") { await editRow(e.target.closest("tr"), PERSON_FIELDS, (body) => api(`/api/admin/passengers/${ps}`, { method: "PATCH", body })); done = true; }
     if (a === "remove-ps" && confirm("Remove this person?")) done = await act(() => api(`/api/admin/passengers/${ps}`, { method: "DELETE" }));
     if (a === "remove-ph" && confirm("Remove this phone? It won't be able to book.")) done = await act(() => api(`/api/admin/phones/${encodeURIComponent(ph)}`, { method: "DELETE" }));
-    if (a === "edit-pl") done = await editPlace(pl);
+    if (a === "edit-pl") { await editPlace(e.target.closest("tr")); done = true; }
     if (a === "remove-pl" && confirm("Remove this place?")) done = await act(() => api(`/api/admin/places/${pl}`, { method: "DELETE" }));
     if (done) open(current);
   });
@@ -510,17 +503,45 @@ function relationTable(h, rel) {
   return `<table><tbody>${rows.map((r) => `<tr data-rel="${esc(r.id)}"><td>${esc(r.a_name)} and ${esc(r.b_name)}</td><td>${esc(r.kind_label)}</td><td>${seat(r)}</td><td class="quiet">${esc(r.note)}</td>
     <td class="actions"><button class="danger" data-act="remove-rel">Remove</button></td></tr>`).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>`;
 }
-const placeRow = (p) => `<tr data-pl="${esc(p.id)}"><td>${esc(p.code)}</td><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${esc(p.address)}</td>
+const placeRow = (p) => `<tr data-pl="${esc(p.id)}" data-item="${esc(JSON.stringify({ code: p.code, name: p.name, spoken: p.spoken || "", address: p.address }))}"><td>${esc(p.code)}</td><td>${esc(p.name)}${p.spoken ? `<div class="quiet" dir="rtl">${esc(p.spoken)}</div>` : ""}</td><td>${esc(p.address)}</td>
   <td class="actions"><button class="ghost" data-act="edit-pl">Edit</button><button class="danger" data-act="remove-pl">Remove</button></td></tr>`;
-async function editPlace(id) {
-  const address = prompt("New address (empty = keep)");
-  const spoken = prompt("Name in Yiddish, as the phone says it (empty = keep)");
-  const body = {};
-  if (address) body.address = address;
-  if (spoken) body.spoken = spoken;
-  if (!Object.keys(body).length) return false;
-  return act(() => api(`/api/admin/places/${id}`, { method: "PATCH", body }), "Saved");
+// Edit a row in place: its cells become a form with the current values; Save sends what changed. Resolves true when
+// saved, false on Cancel.
+function editRow(tr, fields, save) {
+  const v = JSON.parse(tr.dataset.item || "{}");
+  const cols = tr.children.length;
+  const input = (f) => f.options
+    ? `<select name="${f.name}">${f.options.map(([val, label]) => `<option value="${esc(val)}" ${String(v[f.name]) === val ? "selected" : ""}>${esc(label)}</option>`).join("")}</select>`
+    : `<input name="${f.name}" value="${esc(v[f.name] ?? "")}"${f.dir ? ` dir="${f.dir}"` : ""}${f.pattern ? ` pattern="${f.pattern}"` : ""}${f.required ? " required" : ""}${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}>`;
+  tr.innerHTML = `<td colspan="${cols}"><form class="row">${fields.map((f) => `<label>${esc(f.label)} ${input(f)}</label>`).join("")}
+    <button>Save</button><button type="button" class="ghost" data-cancel>Cancel</button></form></td>`;
+  tr.querySelector("input, select")?.focus();
+  return new Promise((resolve) => {
+    tr.querySelector("[data-cancel]").addEventListener("click", (e) => { e.stopPropagation(); resolve(false); });
+    tr.querySelector("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const f = Object.fromEntries(new FormData(e.target));
+      const body = {};
+      for (const k of Object.keys(f)) if (String(f[k]) !== String(v[k] ?? "")) body[k] = f[k];
+      if (!Object.keys(body).length) return resolve(false);
+      if (await act(() => save(body), "Saved")) resolve(true);
+    });
+  });
 }
+const PLACE_FIELDS = [
+  { name: "code", label: "Code on the phone", pattern: "\\d{1,6}", required: true },
+  { name: "name", label: "Name", required: true },
+  { name: "spoken", label: "Name in Yiddish (said on the phone)", dir: "rtl" },
+  { name: "address", label: "Address", required: true },
+];
+const editPlace = (tr) => editRow(tr, PLACE_FIELDS, (body) => api(`/api/admin/places/${tr.dataset.pl}`, { method: "PATCH", body }));
+const PERSON_FIELDS = [
+  { name: "name", label: "Name", required: true },
+  { name: "spoken", label: "Name in Yiddish (said on the phone)", dir: "rtl" },
+  { name: "gender", label: "Man or woman", options: [["m", "Man"], ["f", "Woman"]] },
+  { name: "notes", label: "Notes for the driver" },
+];
 
 // ---------- shared places ----------
 async function places() {
@@ -538,7 +559,7 @@ async function places() {
     const a = e.target.dataset.act;
     const pl = e.target.closest("[data-pl]")?.dataset.pl;
     let done = false;
-    if (a === "edit-pl") done = await editPlace(pl);
+    if (a === "edit-pl") { await editPlace(e.target.closest("tr")); done = true; }
     if (a === "remove-pl" && confirm("Remove this place?")) done = await act(() => api(`/api/admin/places/${pl}`, { method: "DELETE" }));
     if (done) open("places");
   });
