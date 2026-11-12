@@ -151,6 +151,7 @@ async function load() {
 function alertNewRequests() {
   const fresh = (today.requests || []).filter((r) => !seenRequests.has(r.id));
   if (fresh.length && today.driver.status === "online") {
+    if (tab !== "next" && !reorder) tab = "next"; // a new ride: show it
     beep();
     navigator.vibrate?.([300, 150, 300]);
   }
@@ -223,26 +224,21 @@ function render() {
   const st = $("#status");
   st.className = `pill ${d.status}`;
   st.textContent = d.status === "paused" && d.paused_until ? `Paused until ${new Date(d.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : { online: "Online", paused: "Paused", offline: "Offline" }[d.status];
-  $("#status-buttons").innerHTML = `
-    <button class="${d.status === "online" ? "good on" : "ghost"}" data-status="online">Online</button>
-    <button class="${d.status === "paused" ? "on" : "ghost"}" data-status="paused">Pause</button>
-    <button class="${d.status === "offline" ? "bad on" : "ghost"}" data-status="offline">Offline</button>`;
+  // One button: start or stop work (pause is under More).
+  $("#work").innerHTML = d.status === "online"
+    ? '<button class="ghost big" data-status="offline">Stop work</button>'
+    : `<button class="good big" data-status="online">${d.status === "paused" ? "Back to work" : "Start work"}</button>`;
   const n = (today.requests || []).length;
   $("#req-count").textContent = n;
   $("#req-count").hidden = !n;
-  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   const main = $("#main");
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === (tab === "hours" ? "more" : tab));
   if (tab === "next") main.innerHTML = nextView();
-  else if (tab === "requests") main.innerHTML = requestsView();
   else if (tab === "day") main.innerHTML = dayView();
-  else if (tab === "hours") main.innerHTML = hoursView();
+  else if (tab === "hours") main.innerHTML = `<button class="ghost" data-tab-go="more">← Back</button>${hoursView()}`;
   else main.innerHTML = moreView();
 }
 
-function seatsBox(rows) {
-  if (!rows) return "";
-  return `<div class="seats">${rows.map((r) => `<div class="seat"><b>${ROWS[r.row] || r.row}</b>${people(r) || "empty"}${r.free ? ` · ${r.free} free` : ""}</div>`).join("")}</div>`;
-}
 function navLink(s) {
   const q = s.lat != null ? `${s.lat},${s.lng}` : encodeURIComponent(s.address || "");
   return `google.navigation:q=${q}`;
@@ -255,50 +251,55 @@ function mapsWeb(s) {
 // The admin's priority level for a rider (High or Top); nothing for normal.
 const prioBadge = (x) => (x?.priority > 0 ? ` <span class="prio p${x.priority}">${esc(x.priority_label || "High")} priority</span>` : "");
 
+// A stop: what to do, when, who and where. The next stop is big, with one big button for what comes next.
 function stopCard(s, big) {
   const pickup = s.kind === "pickup";
   const late = pickup && s.window && s.arrive > s.window[1];
   return `<div class="card ${big ? "next" : ""}">
-    <div class="kind ${s.kind}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}${late ? ' <span class="late">late</span>' : ""}</div>
+    <div class="kind ${s.kind} ${big ? "huge" : ""}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}${late ? ' <span class="late">late</span>' : ""}</div>
     <h2>${esc(s.rider_name || "Ride")}${prioBadge(s)}</h2>
     <div class="addr">${esc(s.address)}</div>
-    <div class="quiet">${people(s)}${pickup && s.window ? ` · window ${minuteText(s.window[0])}–${minuteText(s.window[1])}` : ""}${s.together ? " · may sit together" : ""}</div>
-    ${s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
+    <div class="quiet">${people(s)}${s.together ? " · may sit together" : ""}</div>
+    ${big && s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
     ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
-    ${big ? `<div class="quiet" style="margin-top:8px">After this stop:</div>${seatsBox(s.seatsHere)}` : ""}
-    ${big ? `<div class="actions">
-      <a class="wide" href="${native ? navLink(s) : mapsWeb(s)}"><button class="ghost big" style="margin:0">Navigate</button></a>
-      ${s.phone ? `<a href="tel:${esc(s.phone)}"><button class="ghost" style="width:100%">Call</button></a>` : ""}
-      ${pickup ? `<button class="bad" data-act="no_show" data-id="${s.booking_id}">No-show</button>
-        <button class="good big wide" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
-        : `<button class="good big wide" data-act="done" data-id="${s.booking_id}">Dropped off (DONE)</button>`}
-    </div>` : ""}
+    ${big ? `
+      ${pickup ? `<button class="good huge-btn" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
+        : `<button class="good huge-btn" data-act="done" data-id="${s.booking_id}">Dropped off</button>`}
+      <div class="actions">
+        <a href="${native ? navLink(s) : mapsWeb(s)}"><button class="ghost big" style="margin:0">Navigate</button></a>
+        ${s.phone ? `<a href="tel:${esc(s.phone)}"><button class="ghost big" style="margin:0">Call</button></a>` : ""}
+      </div>
+      ${pickup ? `<button class="link" data-act="no_show" data-id="${s.booking_id}">Nobody came (no-show)</button>` : ""}` : ""}
   </div>`;
 }
 
-function nextView() {
-  const s = today.next;
-  const head = (today.requests || []).length ? `<div class="card" style="border-color:var(--bad)"><b>${today.requests.length} new request${today.requests.length > 1 ? "s" : ""}</b> <button class="ghost" data-tab-go="requests">Look</button></div>` : "";
-  const lateBtn = `<button class="ghost big" data-late>Running late…</button>`;
-  if (!s) return `${head}<div class="card"><h2>No stops right now</h2><p class="quiet">${today.driver.status === "online" ? "New requests show here and ring the phone." : "Go Online to get ride requests."}</p></div>`;
-  const after = today.route.stops.filter((x) => x.index > s.index && ["accepted", "picked_up"].includes(x.status)).slice(0, 2);
-  return `${head}${stopCard(s, true)}${after.length ? `<h3 class="quiet">Then</h3>${after.map((x) => stopCard(x, false)).join("")}` : ""}${lateBtn}`;
+// A new ride request: who, from where to where, when; "Take it" or "Can't".
+function requestCard(r) {
+  const proposed = r.status === "proposed";
+  return `<div class="card request">
+    <div class="kind huge">${proposed ? "Waiting for the caller" : "New ride"}${r.return_of ? " · ride back" : ""}</div>
+    <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
+    <div class="addr">${esc(r.from)} → ${esc(r.to)}</div>
+    <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
+    ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
+    <div class="actions">
+      <button class="bad big" data-act="reject" data-id="${r.id}">Can't</button>
+      <button class="good big" data-take="${r.id}">Take it</button>
+    </div>
+    <button class="link" data-propose="${r.id}">Offer another time</button>`}
+  </div>`;
 }
 
-function requestsView() {
-  const list = today.requests || [];
-  if (!list.length) return '<div class="card"><p class="quiet">No requests waiting.</p></div>';
-  return list.map((r) => `<div class="card">
-    <div class="kind">${r.status === "proposed" ? `New time offered: ${minuteText(r.proposed_minute)} (waiting for the caller)` : "Request"}${r.return_of ? " · return trip" : ""}</div>
-    <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
-    <div>${esc(r.from)} → ${esc(r.to)}</div>
-    <div class="quiet">${people(r)} · ${minuteText(r.window[0])}–${minuteText(r.window[1])}${r.together ? " · may sit together" : ""}</div>
-    <div class="actions">
-      <button class="big wide" data-preview="${r.id}">See the route with it</button>
-      <button class="bad" data-act="reject" data-id="${r.id}">Reject</button>
-      <button class="ghost" data-propose="${r.id}">Suggest a time</button>
-    </div>
-  </div>`).join("");
+// The main screen: new requests first, then the next stop, then the two after it.
+function nextView() {
+  const reqs = (today.requests || []).map(requestCard).join("");
+  const s = today.next;
+  if (!s) {
+    if (reqs) return reqs;
+    return `<div class="card"><h2>No rides right now</h2><p class="quiet">${today.driver.status === "online" ? "A new ride shows here and the phone rings." : "Press Start work to get rides."}</p></div>`;
+  }
+  const after = today.route.stops.filter((x) => x.index > s.index && ["accepted", "picked_up"].includes(x.status)).slice(0, 2);
+  return `${reqs}${stopCard(s, true)}${after.length ? `<h3 class="quiet">After that</h3>${after.map((x) => stopCard(x, false)).join("")}` : ""}`;
 }
 
 function dayView() {
@@ -319,14 +320,18 @@ function dayView() {
   </div>
   ${editing
     ? `<div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`
-    : `<div class="actions"><button class="ghost" data-reorder>Change the order</button><button class="ghost" data-auto ${today.route.manual ? "" : "disabled"}>Best order</button></div>`}`;
+    : `<div class="actions"><button class="ghost" data-reorder>Change the order</button>${today.route.manual ? '<button class="ghost" data-auto>Back to the best order</button>' : ""}</div>`}`;
 }
 
 function moreView() {
-  return `<div class="card"><h2>${esc(today.driver.name)}</h2><p class="quiet">${esc(today.driver.phone)}</p>
+  const d = today.driver;
+  return `<div class="card">
+    ${d.status === "online" ? '<button class="ghost big" data-status="paused">Take a break…</button>' : ""}
     <button class="ghost big" data-late>Running late…</button>
-    <button class="ghost big" data-feedback>Comment, complaint or request…</button>
-    <button class="ghost big" data-refresh>Load again</button>
+    <button class="ghost big" data-tab-go="hours">My hours (days off)</button>
+    <button class="ghost big" data-feedback>Send a message to the office…</button>
+    <button class="ghost big" data-refresh>Load again</button></div>
+    <div class="card"><h2>${esc(d.name)}</h2><p class="quiet">${esc(d.phone)}</p>
     <button class="bad big" data-signout>Sign out</button></div>
     <p class="quiet">Updated ${lastOk ? new Date(lastOk).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never"}.</p>`;
 }
@@ -426,6 +431,37 @@ async function preview(id) {
     <button class="${blocks.length ? "bad" : "good"} big wide" data-act="accept" data-id="${id}">${blocks.length ? "Accept anyway" : "Accept"}</button><button class="ghost wide" data-close>Close</button></div>`);
 }
 
+// "Take it": check the route first. When it fits and moves nobody, it's accepted right away; otherwise a short
+// question says what changes. The full route is behind "Details".
+async function take(id) {
+  sheet('<p class="quiet">Checking the route…</p>');
+  let r;
+  try { r = await api(`/api/driver/requests/${id}/preview`); } catch { sheet('<p>No signal. Taking a ride needs signal.</p><button class="ghost big" data-close>Close</button>'); return; }
+  const req = (today.requests || []).find((x) => x.id === id);
+  if (!r.ok) {
+    sheet(`<h2>This ride doesn't fit</h2><p>${esc(errText(r.data))}</p>
+      <button class="good big" data-propose="${id}">Offer another time</button>
+      <button class="bad big" data-act="reject" data-id="${id}">Can't take it</button>
+      <button class="ghost big" data-close>Close</button>`);
+    return;
+  }
+  const p = r.data;
+  const moved = Object.keys(p.shifts || {}).length;
+  const blocks = p.blocks || [];
+  if (!moved && !blocks.length) {
+    closeSheet();
+    await act(`/api/driver/bookings/${id}/accept`, {}, { queueable: false, ok: `Taken. Pick up about ${minuteText(p.eta)}` });
+    return;
+  }
+  sheet(`<h2>${esc(req?.rider_name || "Ride")}: pick up about ${minuteText(p.eta)}</h2>
+    ${moved ? `<p>${moved} other ride${moved > 1 ? "s" : ""} will be a little later. They get a message if needed.</p>` : ""}
+    ${blocks.length ? `<div class="notes" style="border:2px solid var(--bad)"><b>Wait:</b> ${blocks.map((x) => `<b>${esc(x.rider_name || "a rider")}</b>`).join(", ")}
+      is also waiting and goes first (${esc(blocks[0].label)} priority). If you take this one, there's no room for them.</div>` : ""}
+    <button class="${blocks.length ? "bad" : "good"} big" data-act="accept" data-id="${id}">${blocks.length ? "Take it anyway" : "Take it"}</button>
+    <button class="bad big" data-act="reject" data-id="${id}">Can't</button>
+    <button class="link" data-preview="${id}">Details</button>`);
+}
+
 function proposeSheet(id) {
   const r = today.requests.find((x) => x.id === id);
   const base = r ? r.window[0] : 600;
@@ -444,7 +480,7 @@ function lateSheet() {
 }
 
 function pauseSheet() {
-  sheet(`<h2>Pause for…</h2><p class="quiet">New callers hear the driver isn't available; you come back Online by yourself.</p>
+  sheet(`<h2>Take a break for…</h2><p class="quiet">Callers hear the driver isn't available. Work starts again by itself.</p>
     <div class="chips">${[15, 30, 60, 120].map((m) => `<button class="ghost" data-pause="${m}">${m < 60 ? `${m} min` : `${m / 60} hour${m > 60 ? "s" : ""}`}</button>`).join("")}</div>
     <button class="ghost big" data-close>Cancel</button>`);
 }
@@ -475,7 +511,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-tab-go]");
   if (!t) return;
   const ds = t.dataset;
-  if (ds.tab || ds.tabGo) { tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
+  if (ds.tab || ds.tabGo) { closeSheet(); tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
   if (ds.schAdd != null) return scheduleSheet();
   if (ds.schKind) { schKind = ds.schKind; scheduleSheet(readSheet()); return; }
   if (ds.schSave != null) return saveSchedule();
@@ -487,22 +523,23 @@ document.addEventListener("click", async (e) => {
   }
   if (ds.status) {
     if (ds.status === "paused") return pauseSheet();
-    if (ds.status === "offline" && !confirm("Go offline? New requests will wait until you're back.")) return;
-    await act("/api/driver/status", { status: ds.status }, { ok: ds.status === "online" ? "You're online" : "You're offline" });
+    if (ds.status === "offline" && !confirm("Stop work? New rides will wait until you start again.")) return;
+    await act("/api/driver/status", { status: ds.status }, { ok: ds.status === "online" ? "Started. Rides will come in" : "Stopped" });
     return;
   }
   if (ds.pause) { closeSheet(); await act("/api/driver/status", { status: "paused", minutes: Number(ds.pause) }, { ok: "Paused" }); return; }
   if (ds.act) {
     const id = ds.id;
-    const names = { pickup: "Picked up", done: "Dropped off", no_show: "No-show", accept: "Accepted", reject: "Rejected" };
-    if (ds.act === "no_show" && !confirm("Mark as no-show? The seats are freed.")) return;
-    if (ds.act === "reject" && !confirm("Reject this ride? The caller gets a message.")) return;
+    const names = { pickup: "Picked up", done: "Dropped off", no_show: "No-show", accept: "Taken", reject: "The caller is told" };
+    if (ds.act === "no_show" && !confirm("Nobody came? The seats are freed.")) return;
+    if (ds.act === "reject" && !confirm("Can't take this ride? The caller gets a message.")) return;
     closeSheet();
     const queueable = ["pickup", "done", "no_show"].includes(ds.act);
     if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
     await act(`/api/driver/bookings/${id}/${ds.act}`, {}, { queueable, ok: names[ds.act] });
     return;
   }
+  if (ds.take) return take(ds.take);
   if (ds.preview) return preview(ds.preview);
   if (ds.propose) return proposeSheet(ds.propose);
   if (ds.proposeAt) { closeSheet(); await act(`/api/driver/bookings/${ds.id}/propose`, { minute: Number(ds.proposeAt) }, { queueable: false, ok: "Sent to the caller" }); return; }
