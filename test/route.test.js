@@ -82,3 +82,21 @@ test("fitRides puts a ride with a tight window ahead of the saved order", () => 
   assert.ok(e.c.pickup <= 602);
   assert.ok(e.a.pickup <= 640 && e.b.pickup <= 640);
 });
+
+test("overlapping rides go in road order: A 1→3 and B 2→4 make 1, 2, 3, 4", () => {
+  const order = (stops) => stops.map((s) => `${s.ride}.${s.kind}`);
+  const want = ["a.pickup", "b.pickup", "a.dropoff", "b.dropoff"];
+  const a = ride("a", 10, 30, 600);
+  const b = ride("b", 20, 40, 600);
+  // Both booked ahead of time.
+  const both = buildRoute([a, b], ctx);
+  assert.ok(both.ok);
+  assert.deepEqual(order(both.stops), want);
+  assert.equal(both.timing.drive, 30, "no driving back and forth");
+  // B calls in while the driver is on the way with A (A is on board, the van is at 15): B fits on the way.
+  const onBoard = { ...a, onBoard: true, pickedUpAt: 600 };
+  const atStart = [{ ride: "a", kind: "dropoff" }];
+  const res = insertRide(atStart, [onBoard], ride("b", 20, 40, 605), { ...ctx, start: { at: "15", minute: 605 } });
+  assert.ok(res.ok);
+  assert.deepEqual(order(res.stops), ["b.pickup", "a.dropoff", "b.dropoff"]);
+});

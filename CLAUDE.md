@@ -18,7 +18,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   P17 unused), max 30 minutes driving. The "#" tip (P67) is said only for a phone's first 3 bookings.
 - Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): who (only on a family's phone), from,
   to, when, read-back. More people, a ride back and someone else are under "more options" (2 at the read-back, P69).
-  Main menu: 1 book, 2 my rides, 3 cancel, 0 more (4 hours, 5 messages, 6 add an address; P68). P06 and P18 unused.
+  The main menu stays as it was, all options said (Shloime, 2026-11-12). P06, P18 and P68 unused.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
   rides on the Now screen with "Take it" / "Can't", one big button per stop.
 

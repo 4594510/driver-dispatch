@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P69) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P69, P68 not used) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -9,7 +9,7 @@ export const PROMPTS = {
   P01: `שלום עליכם, איר האט אנגערופן ${LINE_NAME}.`,
   P02: "סארי, דער נאמבער פון וואו איר רופט איז נישט רעדזשיסטערט.",
   P03: "דער סיסטעם איז יעצט נישט אוועילעבל. רופט גלייך דעם דרייווער.",
-  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. פאר מער, דריקט 0.",
+  P04: "צו באשטעלן א רייד, דריקט 1. צו הערן אייערע ריידס, דריקט 2. צו קענסלען א רייד, דריקט 3. צו הערן ווען עס זענען דא ריידס, דריקט 4. צו הערן די מעלדונגען, דריקט 5. צו צולייגן אן אדרעס, דריקט 6. צו הערן נאכאמאל, דריקט 9.",
   P05: "אויב איר רופט צו קאנפירמען אייער רייד, דריקט 1.",
   P06: "פאר זיך אליין, דריקט 1. פאר איינעם אנדערש, דריקט 2.",
   P07: "פאר וועמען איז די רייד?",
@@ -83,8 +83,7 @@ export const PROMPTS = {
   P65: "צו אפהיטן די אדרעס פאר די קומענדיגע מאל, דריקט 1. נאר פאר די רייד, דריקט 2.",
   P66: "די אדרעס איז אפגעהיטן. דער קאוד איז",
   P67: "ביי יעדע פראגע קענט איר דריקן פאונד צו נעמען די געווענליכע תשובה.",
-  // The short way (2026-11-12): the main menu's "0 for more", and "more options" at the read-back.
-  P68: "צו הערן ווען עס זענען דא ריידס, דריקט 4. צו הערן די מעלדונגען, דריקט 5. צו צולייגן אן אדרעס, דריקט 6. צוריק, דריקט 9.",
+  // "More options" at the read-back (2026-11-12).
   P69: "צו צולייגן נאך מענטשן, דריקט 1. פאר א רייד צוריק, דריקט 2. צו באשטעלן פאר איינעם אנדערש, דריקט 3. צוריק, דריקט 0.",
 };
 

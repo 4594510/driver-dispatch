@@ -300,14 +300,6 @@ test("a caller is known by a family's phone or one person's phone; a family's ph
   ]);
 });
 
-test("the main menu is short: 0 for more (hours, messages, add an address), 9 back", async () => {
-  const db = setup();
-  const r = await call(db, ["0", "9", "0", "4"]);
-  assert.deepEqual(prompts(r[1]), ["P68"]);
-  assert.deepEqual(prompts(r[2]), ["P04"]);
-  assert.ok(prompts(r[4]).includes("P48"), "4 says the hours");
-});
-
 test("menu key 5 plays the messages sent out to everyone or the caller's family, newest first", async () => {
   const db = setup();
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
