@@ -42,6 +42,7 @@ export function rideOf(row) {
     onBoard: row.status === "picked_up",
     pickedUpAt: row.picked_up_minute ?? undefined,
     priority: row.priority ?? 0,
+    seatOverride: !!row.seat_override,
   };
 }
 
@@ -179,8 +180,11 @@ function saveRoute(db, day, stops, timing, seats) {
     ON CONFLICT(day, vehicle_id) DO UPDATE SET stops = excluded.stops, drive_minutes = excluded.drive_minutes,
     estimated = excluded.estimated, updated_at = excluded.updated_at`).run(day, v.id, JSON.stringify(rows), Math.round(timing.drive), timing.estimated ? 1 : 0, at);
   const e = etas(stops, timing);
+  // Seats only counted (a ride taken against the seat rules is on the route): no row plan, the driver seats them.
+  const countOnly = seats && stops.length && !Object.keys(seats).length;
   for (const [id, t] of Object.entries(e)) {
     const sets = ["eta_dropoff_minute = ?", "updated_at = ?"];
+    if (countOnly) sets.push("seats = NULL");
     const vals = [t.dropoff != null ? Math.round(t.dropoff) : null, at];
     if (t.pickup != null) {
       sets.push("eta_minute = ?");
@@ -229,21 +233,34 @@ export async function bookRide(db, travel, input, now = new Date(), settings = D
     if (direct > settings.maxTripMinutes) return { ok: false, errors: ["too_far"], minutes: Math.round(direct) };
   }
   await prefetch(db, travel, [...routedRows(db, day).map(rideOf), ...newRides], ctx);
-  const plan = planDay(db, day, newRides, ctx);
+  let plan = planDay(db, day, newRides, ctx);
+  // Only the seat rules don't fit: the request still goes to the driver, who may take it anyway (Shloime, 2026-11-12).
+  let seatConflict = false;
+  if (!plan.after.ok && plan.after.reason === "no_seats") {
+    const loose = planDay(db, day, newRides.map((r) => ({ ...r, seatOverride: true })), ctx);
+    if (loose.after.ok) { plan = loose; seatConflict = true; }
+  }
   if (!plan.after.ok) {
     return { ok: false, errors: [plan.after.reason], suggestions: suggestTimes(db, day, prep.rides, ctx, settings, now) };
   }
   const saved = saveRides(db, prep.rides, actor || `phone:${prep.phone.number}`);
   const e = etas(plan.after.stops, plan.after.timing);
-  return { ok: true, bookings: saved, etas: Object.fromEntries(saved.map((b) => [b.id, Math.round(e[b.id].pickup)])) };
+  return { ok: true, bookings: saved, seatConflict, etas: Object.fromEntries(saved.map((b) => [b.id, Math.round(e[b.id].pickup)])) };
 }
 
+// The route with this ride in it. When only the seat rules stop it, seatConflict says so and `loose` is the plan with
+// the seats just counted, for the driver to take it anyway.
 async function planWith(db, travel, b, settings, now) {
   await locate(db, travel, [b]);
   const ctx = contextFor(db, travel, settings, b.day, now);
   const ride = rideOf(withPriority(db, b));
   await prefetch(db, travel, [...routedRows(db, b.day).map(rideOf), ride], ctx);
-  return { ...planDay(db, b.day, [ride], ctx), ctx, ride };
+  const p = { ...planDay(db, b.day, [ride], ctx), ctx, ride };
+  if (!p.after.ok && p.after.reason === "no_seats") {
+    const loose = planDay(db, b.day, [{ ...ride, seatOverride: true }], ctx);
+    if (loose.after.ok) return { ...loose, ctx, ride: { ...ride, seatOverride: true }, seatConflict: true };
+  }
+  return p;
 }
 
 // Waiting requests with a higher priority than this one that fit the route now but would no longer fit once this ride
@@ -278,6 +295,8 @@ export async function previewAccept(db, travel, id, settings = DEFAULT_SETTINGS,
   if (!p.after.ok) return { ok: false, errors: [p.after.reason], before };
   return {
     ok: true,
+    seatConflict: !!p.seatConflict,
+    seatsOnBoard: p.seatConflict ? { men: b.men, women: b.women } : undefined,
     before,
     after: describe(p.after.stops, p.after.timing),
     shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops),
@@ -288,18 +307,21 @@ export async function previewAccept(db, travel, id, settings = DEFAULT_SETTINGS,
 }
 
 // The driver accepts: the ride goes into the route, everyone's seats and ETAs are saved.
-export async function acceptRide(db, travel, id, driverId, settings = DEFAULT_SETTINGS, now = new Date()) {
+// opts.override: take it although the seat rules don't fit (the driver saw the notice).
+export async function acceptRide(db, travel, id, driverId, settings = DEFAULT_SETTINGS, now = new Date(), opts = {}) {
   const b = getBooking(db, id);
   if (!b) return { ok: false, errors: ["not_found"] };
   if (!["pending", "proposed"].includes(b.status)) return { ok: false, errors: ["not_pending"] };
   const p = await planWith(db, travel, b, settings, now);
   if (!p.after.ok) return { ok: false, errors: [p.after.reason] };
+  if (p.seatConflict && !opts.override) return { ok: false, errors: ["no_seats"], seatConflict: true };
   const blocks = await priorityBlocks(db, travel, b, p);
   const fresh = getBooking(db, id);
   if (!["pending", "proposed"].includes(fresh.status)) return { ok: false, errors: ["not_pending"] };
-  db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, updated_at = ? WHERE id = ?").run(driverId, nowIso(), id);
+  db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, seat_override = ?, updated_at = ? WHERE id = ?").run(driverId, p.seatConflict ? 1 : 0, nowIso(), id);
   saveRoute(db, b.day, p.after.stops, p.after.timing, p.after.seats);
   const details = { shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops) };
+  if (p.seatConflict) details.seatOverride = true;
   if (blocks.length) details.blocksPriority = blocks.map((x) => x.id);
   audit(db, `driver:${driverId}`, "accepted", id, details);
   return { ok: true, booking: getBooking(db, id), blocks };

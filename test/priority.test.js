@@ -116,7 +116,9 @@ test("priority never moves an accepted ride: a top-priority request that only fi
   const before = getBooking(db, low.id);
   addPriority(db, { householdId: "hhB", level: 2 }, "a");
   const r = await bookRide(db, travel, ask("+18455550003", "homeB", { men: 2 }), now, settings);
-  assert.equal(r.ok, false);
+  // Only the seat rules stop it: it waits for the driver, who decides, and the accepted ride doesn't move.
+  assert.equal(r.seatConflict, true);
+  assert.equal(r.bookings[0].status, "pending");
   const after = getBooking(db, low.id);
   assert.equal(after.status, "accepted");
   assert.equal(after.eta_minute, before.eta_minute);

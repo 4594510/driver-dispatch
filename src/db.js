@@ -209,6 +209,8 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
     eta_dropoff_minute: "INTEGER",
     dropped_off_minute: "INTEGER", // when the driver marked the drop-off
     riders: "TEXT", // JSON [passenger ids] of the people named on the ride; men and women count them too
+    // The driver took the ride although the seat rules didn't fit: while it is on the route, seats are only counted.
+    seat_override: "INTEGER NOT NULL DEFAULT 0",
   });
   // The driver app (stage 5).
   addColumns(db, "drivers", { pin_hash: "TEXT" }); // the app's sign-in: the driver's phone and a PIN set by an admin

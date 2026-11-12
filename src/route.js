@@ -12,7 +12,7 @@
 // New rides are inserted into the existing order at the best place (the classic dial-a-ride insertion), so people
 // already promised a time keep it: an insertion may not make anyone later or longer on board than they already were.
 // When no insertion fits, the whole day is rebuilt once from scratch in pickup-time order, which sometimes finds room.
-import { planSeats, DEFAULT_LAYOUT } from "./seating.js";
+import { planSeats, DEFAULT_LAYOUT, capacity } from "./seating.js";
 
 const EPS = 0.01;
 
@@ -80,8 +80,11 @@ function seatInput(stops, rides) {
 }
 
 // Seats for a route. Riders on board keep their seats exactly; everyone else may be moved before pickup.
+// A ride the driver took against the seat rules (seatOverride) makes the check count heads only: at no point more
+// people on board than the van has seats. The driver seats them himself.
 export function seatRoute(stops, rides, layout = DEFAULT_LAYOUT) {
   const input = seatInput(stops, rides);
+  if (rides.some((r) => r.seatOverride && input.some((x) => x.id === r.id))) return headCount(input, stops.length, layout);
   const res = planSeats(input, layout);
   if (!res.ok) return res;
   for (const r of rides) {
@@ -89,6 +92,14 @@ export function seatRoute(stops, rides, layout = DEFAULT_LAYOUT) {
     if (JSON.stringify(countRows(res.plan[r.id])) !== JSON.stringify(countRows(r.seats))) return { ok: false, reason: "no_seating" };
   }
   return res;
+}
+function headCount(input, n, layout) {
+  const cap = capacity(layout);
+  for (let i = -1; i < n; i++) {
+    const heads = input.filter((b) => b.pickup <= i && i < b.dropoff).reduce((t, b) => t + b.men + b.women, 0);
+    if (heads > cap) return { ok: false, reason: "full" };
+  }
+  return { ok: true, plan: {}, countOnly: true };
 }
 // Men and women per row (who exactly sits where may have been worked out before a seat rule was added).
 const countRows = (p) => Object.fromEntries(Object.entries(p || {}).sort().map(([k, v]) => [k, { men: v.men, women: v.women }]));

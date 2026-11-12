@@ -11,6 +11,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Driver app: Android APK. Admin dashboard: English, web.
 - Seating: front seat 1 man only; rows 2 and 3 hold 3 each, one gender per row, unless one booking marked
   "together" has the row to itself. Riders keep their seats from pickup to drop-off. See src/seating.js.
+  When only the seat rules don't fit, the request still goes to the driver; the app tells him and he may take it
+  anyway (bookings.seat_override): while it is on the route, seats are only counted (never over 7), no row plan.
 - Relations (dashboard, Families tab): two people's relation plus a seat rule: "may sit next to each other" (that man
   and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). The phone
   no longer names who is coming (2026-11-12): rules apply to the riders named on a ride (dashboard, or the caller).

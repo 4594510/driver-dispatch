@@ -14,7 +14,7 @@ export async function rideAction(ctx, id, action, body, actor, driverId) {
   const was = getBooking(db, id);
   if (!was) return { ok: false, errors: ["not_found"] };
   if (action === "accept") {
-    const r = await acceptRide(db, travel, id, driverId, settings, now);
+    const r = await acceptRide(db, travel, id, driverId, settings, now, { override: !!body?.override });
     if (r.ok) notify(r.booking, "accepted");
     return r;
   }
