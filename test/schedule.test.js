@@ -126,8 +126,8 @@ test("phone: on a closed day callers hear it at once, and can't start a booking"
 test("phone: other hours today are said at the start; a time outside them is refused with the hours", async () => {
   const db = setup();
   add(db, { from: "2026-11-11", openMinute: 600, closeMinute: 840 });
-  // 1 order, 1 for me, 1 man, 0 women, 1 from home, 2 other place, 20, 2 later, 0330 (past 2 PM)
-  const r = await call(db, ["1", "1", "0", "2", "1", "2", "20", "2", "0330"]);
+  // 1 order (his own phone), 0 from home, 20 to the shul, 2 later, 0330 (past 2 PM)
+  const r = await call(db, ["1", "0", "20", "2", "0330"]);
   assert.deepEqual(prompts(r[0]), ["P01", "P48", "P04"]);
   assert.deepEqual(said(r[0]), ["צען", "אינדערפרי", "ביז", "צוויי", "נאכמיטאג"]);
   const refused = r[r.length - 1];

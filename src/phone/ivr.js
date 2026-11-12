@@ -22,13 +22,15 @@ const TRIES = 2;
 // What "#" means at each question: the usual answer. Questions that book or cancel need a real key.
 const SKIP = {
   who: "1", more: "0", with: "0", extra: "2", extra_men: "0", extra_women: "0", men: "0", women: "0", together: "2",
-  from: "1", to: "1", from_keep: "2", to_keep: "2", when: "1", ret: "2", reminder_in: "2",
+  from_keep: "2", to_keep: "2", when: "1", ret: "2", reminder_in: "2",
 };
 const CODE_KEYS = MAX_CODE_DIGITS;
+// From and to take a place code right away (Shloime, 2026-11-12): the code and #, 0 for home, # alone (or no key) to
+// say an address, * for the list of places.
+const STEP_KEYS = { from: CODE_KEYS, to: CODE_KEYS };
 // Fewer questions (feedback 2026-11-11: "too many steps"): the pickup window is no longer asked, every ride gets the
-// usual 15 minutes; and the "#" tip (P67) is said only until a phone has booked a few rides.
+// usual 15 minutes.
 const WINDOW = 15;
-const TIP_BOOKINGS = 3;
 // The short way (Shloime, 2026-11-12: "quick, easy, simple; the advanced options behind a choice for more"): who (only
 // on a family's phone), from, to, when, then the read-back. Everything else (more people, a ride back, someone else)
 // is under "more options" at the read-back, and each of those comes back to the read-back.
@@ -72,20 +74,20 @@ function normalize(s) {
   return null;
 }
 const clean = (res) => ({ ...res, play: (res.play || []).flat(Infinity).filter(Boolean), hangup: !!res.hangup });
-const ask = (step, play, maxKeys = 1) => ({ play, gather: { step, max_keys: maxKeys, timeout_s: 6 } });
+const ask = (step, play, maxKeys = STEP_KEYS[step] || 1) => ({ play, gather: { step, max_keys: maxKeys, timeout_s: 6 } });
 // Let the caller speak (a one-time address): Fonory turns it into text and comes back to `step` with it.
 const listen = (step, play) => ({ play, listen: { step, max_s: 20 } });
 const end = (play) => ({ play: [play, P("P41")], hangup: true });
 
 // A wrong key or none: say so and ask again, twice at most, then say goodbye.
-function retry(c, step, question, maxKeys = 1) {
+function retry(c, step, question, maxKeys = STEP_KEYS[step] || 1) {
   c.st.tries ||= {};
   c.st.tries[step] = (c.st.tries[step] || 0) + 1;
   if (c.st.tries[step] > TRIES) return end([]);
   return ask(step, [P(c.keys ? "P42" : "P43"), question], maxKeys);
 }
 // The same, when the answer was a real one that doesn't fit (a time outside today's hours): say why instead.
-function retryBecause(c, step, why, question, maxKeys = 1) {
+function retryBecause(c, step, why, question, maxKeys = STEP_KEYS[step] || 1) {
   c.st.tries ||= {};
   c.st.tries[step] = (c.st.tries[step] || 0) + 1;
   if (c.st.tries[step] > TRIES) return end([why]);
@@ -392,11 +394,8 @@ const STEPS = {
       settle(c, "menu");
       if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
       c.st.draft = { men: 0, women: 0 };
-      // The "#" tip only for a phone's first few bookings: after that the caller knows it, and it is one less thing to hear.
-      const booked = c.db.prepare("SELECT count(*) AS n FROM bookings WHERE booked_by_phone = ?").get(c.phone.number).n;
-      const tip = booked < TIP_BOOKINGS ? P("P67") : null;
-      const first = startRide(c) || ask("from", Q.from());
-      return { ...first, play: [tip, first.play] };
+      // The "#" tip (P67) is no longer said: at from and to, # alone now means saying an address.
+      return startRide(c) || ask("from", Q.from());
     }
     if (c.keys === "6") {
       settle(c, "menu");
@@ -618,14 +617,18 @@ const STEPS = {
 };
 
 function pickPlace(c, which, next) {
-  if (c.keys === "1") {
+  if (c.keys === "") return listen(`${which}_say`, [P("P56")]); // # alone or no key: say the address
+  if (c.keys === "*") return ask(which, [placeList(c), Q[which]()]);
+  if (c.keys === "0") {
     const home = homeOf(c);
     if (home) return setPlace(c, which, home, next);
-    return ask(`${which}_code`, Q[`${which}_code`](), CODE_KEYS);
+    return retry(c, which, Q[which]());
   }
-  if (c.keys === "2") return ask(`${which}_code`, Q[`${which}_code`](), CODE_KEYS);
-  if (c.keys === "3") return listen(`${which}_say`, [P("P56")]);
-  return retry(c, which, Q[which]());
+  if (normalCode(c.keys) === SAY_CODE) return listen(`${which}_say`, [P("P56")]); // 100: say a new address
+  const matches = /^\d+$/.test(c.keys) ? codeMatches(c.db, c.keys, c.phone.household_id) : [];
+  if (!matches.length) return retry(c, which, Q[which]());
+  if (matches.length > 1) return askChoice(c, which, matches);
+  return setPlace(c, which, matches[0], next);
 }
 
 // ---------- a one-time address: said out loud, found on the map, read back, not saved to the family's places ----------

@@ -15,10 +15,12 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). Callers
   name who is coming from their family and relatives on the phone; men/women still count everyone.
 - Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows (the phone no longer asks: always 15,
-  P17 unused), max 30 minutes driving. The "#" tip (P67) is said only for a phone's first 3 bookings.
+  P17 unused), max 30 minutes driving. The "#" tip (P67) is not said any more.
 - Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): who (only on a family's phone), from,
   to, when, read-back. More people, a ride back and someone else are under "more options" (2 at the read-back, P69).
   The main menu stays as it was, all options said (Shloime, 2026-11-12). P06, P18 and P68 unused.
+  From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
+  2026-11-12). The "#" tip (P67) is no longer said.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
   rides on the Now screen with "Take it" / "Can't", one big button per stop.
 
@@ -37,7 +39,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-  Key 3 at "from"/"to" (still taken, no longer said) is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
+  "#" alone at "from"/"to" (or code 100) is a one-time address: the caller says it (Teltech's voice collect with transcribe, the only
   spoken step; also code 100), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
   or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
 - src/places.js: saved addresses, usable by everyone (codes 1-6 digits, default the house number, 100 reserved). Two
