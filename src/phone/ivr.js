@@ -285,14 +285,30 @@ function onward(c, next) {
 }
 // Who rides: a phone of one person books that person; a family's phone picks a name; a family with nobody entered
 // just says how many men and women.
+// First question (Shloime, 2026-11-12): for yourself, or more people (then just how many men and women in all).
 function startRide(c) {
+  return ask("who", Q.who());
+}
+// "For myself": a person's own phone is that person; a family's phone picks the name; a family with nobody entered
+// says how many.
+function forMyself(c) {
   const d = c.st.draft;
   if (c.phone.passenger_id) {
     d.passengerId = c.phone.passenger_id;
     setPeople(c, 0, 0);
-    return null;
+    return onward(c, "from");
   }
   if (members(c).length) return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
+  return ask("men", Q.men());
+}
+// "More people": how many men and how many women in all. Seats are counted only: men and women in separate rows.
+function askCounts(c) {
+  const d = c.st.draft;
+  d.with = [];
+  d.choices = null;
+  d.extraMen = 0;
+  d.extraWomen = 0;
+  d.together = false;
   return ask("men", Q.men());
 }
 function allMayMix(c) {
@@ -395,7 +411,7 @@ const STEPS = {
       if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
       c.st.draft = { men: 0, women: 0 };
       // The "#" tip (P67) is no longer said: at from and to, # alone now means saying an address.
-      return startRide(c) || ask("from", Q.from());
+      return startRide(c);
     }
     if (c.keys === "6") {
       settle(c, "menu");
@@ -420,12 +436,7 @@ const STEPS = {
     if (!d) return ask("menu", MENU);
     d.editing = true;
     if (c.keys === "0") return ask("confirm", readBack(c));
-    if (c.keys === "1") {
-      d.with = [];
-      d.choices = null;
-      if (!namedIds(d).length) return ask("men", Q.men());
-      return askWith(c);
-    }
+    if (c.keys === "1") return askCounts(c);
     if (c.keys === "2") return ask("ret_time", Q.ret_time(), 4);
     if (c.keys === "3") {
       if (!members(c).length) return ask("men", Q.men());
@@ -434,11 +445,12 @@ const STEPS = {
     return retry(c, "more", Q.more());
   },
   who(c) {
-    if (c.keys === "1" || (c.keys === "2" && !members(c).length)) {
+    if (!c.st.draft) return ask("menu", MENU);
+    if (c.keys === "1") return forMyself(c);
+    if (c.keys === "2") {
       c.st.draft.passengerId = c.phone.passenger_id || null;
-      return askWith(c);
+      return askCounts(c);
     }
-    if (c.keys === "2") return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
     return retry(c, "who", Q.who());
   },
   who_pick(c) {
@@ -498,9 +510,14 @@ const STEPS = {
   women(c) {
     const n = Number(c.keys);
     if (c.keys === "" || !(n >= 0 && n <= 6)) return retry(c, "women", Q.women());
-    if (n + c.st.draft.men === 0) return retry(c, "men", Q.men());
-    c.st.draft.women = n;
-    if (c.st.draft.men && n) return ask("together", Q.together());
+    const d = c.st.draft;
+    if (n + d.men === 0) return retry(c, "men", Q.men());
+    d.women = n;
+    if (d.men + n > 7) return end([P("P23")]);
+    // The rider named on the ride (a person's own phone) only when the counts include them: someone may book for others.
+    const named = d.passengerId && passenger(c, d.passengerId);
+    if (named && (named.gender === "f" ? n : d.men) === 0) d.passengerId = null;
+    if (d.passengerId) d.with = [];
     return onward(c, "from");
   },
   together(c) {
@@ -563,7 +580,7 @@ const STEPS = {
     }
     if (c.keys === "3") {
       c.st.draft = { men: 0, women: 0 };
-      return startRide(c) || ask("from", Q.from());
+      return startRide(c);
     }
     return retry(c, "confirm", readBack(c));
   },

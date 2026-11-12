@@ -12,13 +12,15 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Seating: front seat 1 man only; rows 2 and 3 hold 3 each, one gender per row, unless one booking marked
   "together" has the row to itself. Riders keep their seats from pickup to drop-off. See src/seating.js.
 - Relations (dashboard, Families tab): two people's relation plus a seat rule: "may sit next to each other" (that man
-  and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). Callers
-  name who is coming from their family and relatives on the phone; men/women still count everyone.
+  and woman may share a row, even on separate rides) or "must not sit next to each other" (never one row). The phone
+  no longer names who is coming (2026-11-12): rules apply to the riders named on a ride (dashboard, or the caller).
 - Hours 10 AM to 6 PM America/New_York, same day only, 15 or 30 minute windows (the phone no longer asks: always 15,
   P17 unused), max 30 minutes driving. The "#" tip (P67) is not said any more.
-- Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): who (only on a family's phone), from,
-  to, when, read-back. More people, a ride back and someone else are under "more options" (2 at the read-back, P69).
-  The main menu stays as it was, all options said (Shloime, 2026-11-12). P06, P18 and P68 unused.
+- Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): for myself or more people (P06; more
+  people = how many men, how many women in all, P08/P09, no "together" question: seats are just counted, one gender per
+  row), from, to, when, read-back. "For myself" on a family's phone picks the name (P07). A ride back and someone else
+  are under "more options" (2 at the read-back, P69). The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
+  P60-P64 and P68 unused.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
