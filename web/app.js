@@ -188,11 +188,13 @@ function wireBookings(el, reload) {
       const moves = Object.entries(p.shifts).flatMap(([bid, k]) => Object.entries(k).map(([kind, [from, to]]) =>
         `  ${names[bid] || "a rider"}: ${kind === "pickup" ? "pickup" : "drop-off"} ${minuteText(from)} → ${minuteText(to)}`));
       const blocks = (p.blocks || []).map((x) => `  ${x.rider_name || "a rider"} (${x.label} priority, ${minuteText(x.window[0])})`);
-      const text = (blocks.length ? `WAIT: accepting this leaves no room for a higher-priority ride that is also waiting:\n${blocks.join("\n")}\nHigher priority should go first.\n\n` : "") +
+      const seat = p.seatConflict ? "SEATS: with this ride men and women can't each get their own rows. The driver seats them himself.\n\n" : "";
+      const text = seat + (blocks.length ? `WAIT: accepting this leaves no room for a higher-priority ride that is also waiting:\n${blocks.join("\n")}\nHigher priority should go first.\n\n` : "") +
         `Pickup about ${minuteText(p.eta)}.\nDriving today: ${p.before.driveMinutes} → ${p.after.driveMinutes} minutes.` +
         (moves.length ? `\nTimes that move:\n${moves.join("\n")}` : "\nNobody else's time moves.") +
-        (p.after.estimated ? "\n(Some drive times are estimates.)" : "") + (blocks.length ? "\n\nAccept this ride anyway?" : "\n\nAccept this ride?");
+        (p.after.estimated ? "\n(Some drive times are estimates.)" : "") + (blocks.length || seat ? "\n\nAccept this ride anyway?" : "\n\nAccept this ride?");
       if (!confirm(text)) return;
+      if (p.seatConflict) body = { override: true };
     }
     if (a === "propose") {
       const t = prompt("New pickup time (for example 14:30)");

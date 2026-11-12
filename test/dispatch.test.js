@@ -127,3 +127,32 @@ test("an address Google can't find still plans, with the legs marked as guessed"
   assert.equal(getBooking(db, a.id).pickup_lat, null);
   assert.equal(dayRoute(db, day).estimated, true);
 });
+
+test("seats that don't fit the rules: the request still reaches the driver, who is told and may take it anyway", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  // 2 men and 5 women: one man in front, the other man would need a row of his own, so the rules don't fit 7.
+  const r = await bookRide(db, travel, ask({ men: 2, women: 5 }), now, settings);
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.equal(r.seatConflict, true);
+  const id = r.bookings[0].id;
+  const p = await previewAccept(db, travel, id, settings, now);
+  assert.equal(p.ok, true);
+  assert.equal(p.seatConflict, true);
+  // Without "anyway" it is refused with the reason; with it, it is taken and the seats are only counted.
+  const no = await acceptRide(db, travel, id, "drv1", settings, now);
+  assert.deepEqual(no.errors, ["no_seats"]);
+  assert.equal(no.seatConflict, true);
+  const yes = await acceptRide(db, travel, id, "drv1", settings, now, { override: true });
+  assert.ok(yes.ok);
+  assert.equal(getBooking(db, id).seat_override, 1);
+  assert.equal(getBooking(db, id).seats, null);
+  // The van is still never over 7: one more person at the same time doesn't fit at all.
+  const more = await bookRide(db, travel, ask({ men: 1 }), now, settings);
+  assert.equal(more.ok, false);
+  // A normal ride later in the day still fits.
+  const later = await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings);
+  assert.ok(later.ok);
+  assert.ok((await acceptRide(db, travel, later.bookings[0].id, "drv1", settings, now)).ok);
+  assert.equal((await refreshDay(db, travel, day, settings, now)).ok, true);
+});

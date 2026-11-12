@@ -428,7 +428,7 @@ async function preview(id) {
     <p class="quiet" style="margin-top:12px">The new route:</p>
     ${p.after.stops.map((s) => `<div class="stop"><div class="time">${minuteText(s.arrive)}</div><div class="body">${s.kind === "pickup" ? "Pick up" : "Drop off"} <b>${esc(p.names[s.booking_id] || "")}</b>${s.booking_id === id ? " (new)" : ""}</div></div>`).join("")}
     <div class="actions"><button class="bad" data-act="reject" data-id="${id}">Reject</button><button class="ghost" data-propose="${id}">Suggest a time</button>
-    <button class="${blocks.length ? "bad" : "good"} big wide" data-act="accept" data-id="${id}">${blocks.length ? "Accept anyway" : "Accept"}</button><button class="ghost wide" data-close>Close</button></div>`);
+    <button class="${blocks.length || p.seatConflict ? "bad" : "good"} big wide" data-act="accept" data-id="${id}" ${p.seatConflict ? 'data-override="1"' : ""}>${blocks.length || p.seatConflict ? "Accept anyway" : "Accept"}</button><button class="ghost wide" data-close>Close</button></div>`);
 }
 
 // "Take it": check the route first. When it fits and moves nobody, it's accepted right away; otherwise a short
@@ -448,7 +448,8 @@ async function take(id) {
   const p = r.data;
   const moved = Object.keys(p.shifts || {}).length;
   const blocks = p.blocks || [];
-  if (!moved && !blocks.length) {
+  const seat = !!p.seatConflict;
+  if (!moved && !blocks.length && !seat) {
     closeSheet();
     await act(`/api/driver/bookings/${id}/accept`, {}, { queueable: false, ok: `Taken. Pick up about ${minuteText(p.eta)}` });
     return;
@@ -457,7 +458,9 @@ async function take(id) {
     ${moved ? `<p>${moved} other ride${moved > 1 ? "s" : ""} will be a little later. They get a message if needed.</p>` : ""}
     ${blocks.length ? `<div class="notes" style="border:2px solid var(--bad)"><b>Wait:</b> ${blocks.map((x) => `<b>${esc(x.rider_name || "a rider")}</b>`).join(", ")}
       is also waiting and goes first (${esc(blocks[0].label)} priority). If you take this one, there's no room for them.</div>` : ""}
-    <button class="${blocks.length ? "bad" : "good"} big" data-act="accept" data-id="${id}">${blocks.length ? "Take it anyway" : "Take it"}</button>
+    ${seat ? `<div class="notes" style="border:2px solid var(--warn)"><b>Seats:</b> with this ride, men and women can't each get their own rows
+      (${esc(people(req || p.seatsOnBoard || {}))} on this ride). You can still take it and seat them yourself.</div>` : ""}
+    <button class="${blocks.length || seat ? "bad" : "good"} big" data-act="accept" data-id="${id}" ${seat ? 'data-override="1"' : ""}>${blocks.length || seat ? "Take it anyway" : "Take it"}</button>
     <button class="bad big" data-act="reject" data-id="${id}">Can't</button>
     <button class="link" data-preview="${id}">Details</button>`);
 }
@@ -536,7 +539,7 @@ document.addEventListener("click", async (e) => {
     closeSheet();
     const queueable = ["pickup", "done", "no_show"].includes(ds.act);
     if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
-    await act(`/api/driver/bookings/${id}/${ds.act}`, {}, { queueable, ok: names[ds.act] });
+    await act(`/api/driver/bookings/${id}/${ds.act}`, ds.override ? { override: true } : {}, { queueable, ok: names[ds.act] });
     return;
   }
   if (ds.take) return take(ds.take);
