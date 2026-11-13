@@ -3,6 +3,7 @@
 // { play: [{ prompt } | { audio } | { say }], gather?: { step, max_keys, timeout_s }, hangup }; src/phone/fonory.js
 // (readStep, toActions) translates to and from Teltech's Ride Line format.
 // Where the caller is (the ride being ordered, the list just read out) is kept per call in phone_calls.
+import { greetingPrompt } from "./greeting.js";
 import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
@@ -209,7 +210,7 @@ function placeList(c) {
 const Q = {
   menu: () => MENU,
   who: () => [P("P06")],
-  more: () => [P("P69")],
+  more: () => [P("P70")], // change something (2 at the read-back)
   men: () => [P("P08")],
   women: () => [P("P09")],
   with: () => [P("P61")],
@@ -410,14 +411,14 @@ const STEPS = {
       .get(today(c).day, c.from);
     if (offered) {
       c.st.offered = offered.id;
-      return ask("time_in", [P("P01"), timeQuestion(c, offered, offered.proposed_minute, offered.pickup_minute)]);
+      return ask("time_in", [P(greetingPrompt(c.now, c.settings.timeZone)), timeQuestion(c, offered, offered.proposed_minute, offered.pickup_minute)]);
     }
     if (waiting) {
       c.st.reminder = waiting.booking_id;
-      return ask("reminder_in", [P("P01"), P("P05")]);
+      return ask("reminder_in", [P(greetingPrompt(c.now, c.settings.timeZone)), P("P05")]);
     }
     // A schedule change today: say it right away (no rides today, or today's other hours).
-    return ask("menu", [P("P01"), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
+    return ask("menu", [P(greetingPrompt(c.now, c.settings.timeZone)), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
   },
   async time_in(c) {
     const b = c.st.offered ? getBooking(c.db, c.st.offered) : null;
@@ -473,8 +474,11 @@ const STEPS = {
     d.editing = true;
     if (c.keys === "0") return ask("confirm", readBack(c));
     if (c.keys === "1") return askCounts(c);
-    if (c.keys === "2") return ask("ret_time", Q.ret_time(), 4);
-    if (c.keys === "3") {
+    if (c.keys === "2") return ask("from", Q.from());
+    if (c.keys === "3") return ask("to", Q.to());
+    if (c.keys === "4") return ask("when", Q.when());
+    if (c.keys === "5") return ask("ret_time", Q.ret_time(), 4);
+    if (c.keys === "6") {
       if (!members(c).length) return ask("men", Q.men());
       return ask("who_pick", whoPick(c), members(c).length > 9 ? 2 : 1);
     }
@@ -615,8 +619,8 @@ const STEPS = {
       return ask("more", Q.more());
     }
     if (c.keys === "3") {
-      c.st.draft = { men: 0, women: 0 };
-      return startRide(c);
+      c.st.draft = null;
+      return ask("menu", [P("P71"), MENU]);
     }
     return retry(c, "confirm", readBack(c));
   },
@@ -715,13 +719,14 @@ function keepAddress(c, which, next) {
   if (!c.st.heard || !c.st.draft) return ask("menu", MENU);
   if (c.keys === "1") {
     const said = saveHeard(c, (id) => { c.st.draft[which] = id; c.st.draft[`${which}Address`] = null; });
+    if (c.st.draft.editing) return ask("confirm", [said, readBack(c)]);
     return ask(next, [said, Q[next]()]);
   }
   if (c.keys !== "2") return retry(c, `${which}_keep`, [P("P65")]);
   c.st.draft[which] = null;
   c.st.draft[`${which}Address`] = c.st.heard;
   c.st.heard = null;
-  return ask(next, Q[next]());
+  return onward(c, next);
 }
 // Save what the caller said as a shared place; its code is the house number when free. Returns what to say.
 function saveHeard(c, use = () => {}) {
@@ -770,7 +775,7 @@ function setPlace(c, which, place, next) {
   if (which === "to" && place.id === c.st.draft.from) return retry(c, "to", Q.to());
   c.st.draft[which] = place.id;
   c.st.draft[`${which}Address`] = null;
-  return ask(next, Q[next]());
+  return onward(c, next);
 }
 
 function myRides(c) {

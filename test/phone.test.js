@@ -67,7 +67,7 @@ test("booking a ride by phone the short way: from, to, when, and it's read back"
   const sent = [];
   // 1 order, 1 for myself (Moshe's own phone: no names), 0 from home, code 20 to the shul, 2 later, 1200, 1 correct.
   const r = await call(db, ["1", "1", "0", "20", "2", "1200", "1"], { extra: { notify: (b, k) => sent.push(k) } });
-  assert.deepEqual(prompts(r[0]), ["P01", "P04"]);
+  assert.deepEqual(prompts(r[0]), ["P76", "P04"]);
   assert.deepEqual(prompts(r[1]), ["P06"]);
   assert.deepEqual(prompts(r[2]), ["P11"]);
   assert.equal(r[2].gather.max_keys, 6, "a place code is typed right away");
@@ -89,12 +89,12 @@ test("booking a ride by phone the short way: from, to, when, and it's read back"
   assert.ok(db.prepare("SELECT 1 FROM clips WHERE text = 'משה' AND status = 'wanted'").get());
 });
 
-test("more options at the read-back: someone else, more people, a ride back", async () => {
+test("change something at the read-back: someone else, how many people, a ride back, the time; 3 cancels", async () => {
   const db = setup();
-  // The short way to the read-back, then 2 more options, 3 someone else, 2 Rivka (read-back again), 2 more options,
-  // 1 more people: 0 men, 2 women (read-back), 2 more, 2 ride back, 0300, 1 book.
-  const r = await call(db, ["1", "1", "0", "20", "2", "1200", "2", "3", "2", "2", "1", "0", "2", "2", "2", "0300", "1"]);
-  assert.deepEqual(prompts(r[7]), ["P69"]);
+  // The short way to the read-back, then 2 change, 6 someone else, 2 Rivka (read-back again), 2 change,
+  // 1 how many people: 0 men, 2 women (read-back), 2 change, 5 ride back, 0300, 1 book.
+  const r = await call(db, ["1", "1", "0", "20", "2", "1200", "2", "6", "2", "2", "1", "0", "2", "2", "5", "0300", "1"]);
+  assert.deepEqual(prompts(r[7]), ["P70"]);
   assert.deepEqual(prompts(r[8]), ["P07"]);
   assert.ok(said(r[8]).includes("רבקה"), "names are read out");
   assert.deepEqual(prompts(r[9]), ["P19", "P20"]);
@@ -109,10 +109,18 @@ test("more options at the read-back: someone else, more people, a ride back", as
   assert.equal(b.women, 2);
   assert.equal(b.men, 0);
   assert.equal(back.pickup_minute, 900);
-  // 0 at more options goes back to the read-back; 3 at the read-back starts over.
+  // 0 at "change" goes back to the read-back; 3 at the read-back cancels: nothing booked, back to the menu.
   const again = await call(db, ["1", "1", "0", "20", "1", "2", "0", "3"], { id: "z" });
   assert.deepEqual(prompts(again[7]), ["P19", "P20"]);
-  assert.deepEqual(prompts(again[8]), ["P06"]);
+  assert.deepEqual(prompts(again[8]), ["P71", "P04"]);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM bookings").get().n, 2);
+  // 2 change, 4 the time: 1:00 PM, read back with the new time, and booked; 2 change, 3 "to" goes back too.
+  const time = await call(db, ["1", "1", "0", "20", "2", "1200", "2", "4", "2", "0100", "2", "3", "20", "1"], { id: "t" });
+  assert.deepEqual(prompts(time[8]), ["P15"]);
+  assert.deepEqual(prompts(time[10]), ["P19", "P20"]);
+  assert.deepEqual(prompts(time[12]), ["P12"]);
+  assert.deepEqual(prompts(time[13]), ["P19", "P20"], "a changed place goes back to the read-back");
+  assert.ok(db.prepare("SELECT 1 FROM bookings WHERE pickup_minute = 780").get(), "booked at 1:00 PM");
 });
 
 test("more people: just how many men and women in all, no 'together' question; a full van offers the next time", async () => {
@@ -129,7 +137,7 @@ test("more people: just how many men and women in all, no 'together' question; a
   assert.equal(b.passenger_id, "ps1", "Moshe is one of the men");
   await acceptRide(db, travel, b.id, "drv1", settings, now);
   // Rivka alone: for someone else under more options.
-  const r = await call(db, ["1", "1", "0", "20", "2", "1200", "2", "3", "2", "1"], { id: "b" });
+  const r = await call(db, ["1", "1", "0", "20", "2", "1200", "2", "6", "2", "1"], { id: "b" });
   const offer = r[r.length - 1];
   assert.deepEqual(prompts(offer), ["P23", "P27", "P27b"]);
   const take = await phoneStep(ctx(db), { call_id: "b", from: "8455550001", step: offer.gather.step, keys: "1" });
@@ -211,7 +219,7 @@ test("messages: queued by the phone's setting, sent through Fonory, retried when
 
   // Calling back afterwards, the caller can confirm that ride first.
   const back = await call(db, ["1", "1"], { id: "back", extra: { now: new Date("2026-11-11T15:15:00Z") } });
-  assert.deepEqual(prompts(back[0]), ["P01", "P05"]);
+  assert.deepEqual(prompts(back[0]), ["P76", "P05"]);
   assert.deepEqual(prompts(back[1]), ["P30a", "P04"]);
   assert.equal(getBooking(db, b.id).confirmed_by_passenger, 1);
 });
@@ -510,7 +518,7 @@ test("a time the driver offered is answered by calling in: 1 agrees, 2 cancels, 
 
   // The caller calls in: the question comes before the menu; a wrong key asks again.
   const first = await phoneStep(ctx(db), { call_id: "in1", from: "8455550001", step: "start", keys: "" });
-  assert.deepEqual(prompts(first), ["P01", "P38a", "P38b"]);
+  assert.deepEqual(prompts(first), ["P76", "P38a", "P38b"]);
   assert.equal(first.gather.step, "time_in");
   const wrong = await phoneStep(ctx(db), { call_id: "in1", from: "8455550001", step: "time_in", keys: "7" });
   assert.deepEqual(prompts(wrong), ["P42", "P38a", "P38b"]);
@@ -523,7 +531,7 @@ test("a time the driver offered is answered by calling in: 1 agrees, 2 cancels, 
   // The call that was still waiting to ask is not made any more.
   assert.equal(db.prepare("SELECT count(*) n FROM deliveries WHERE kind = 'time_change' AND status = 'queued'").get().n, 0);
   // The next call goes straight to the menu.
-  assert.deepEqual(prompts(await phoneStep(ctx(db), { call_id: "in2", from: "8455550001", step: "start", keys: "" })), ["P01", "P04"]);
+  assert.deepEqual(prompts(await phoneStep(ctx(db), { call_id: "in2", from: "8455550001", step: "start", keys: "" })), ["P76", "P04"]);
 
   // Another ride, and this time the caller says no: it is cancelled.
   await call(db, ["1", "1", "0", "20", "2", "0300", "1"], { id: "b" });

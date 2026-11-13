@@ -1,3 +1,4 @@
+import { greetingPrompt } from "../src/phone/greeting.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, normalizePhone } from "../src/server.js";
@@ -172,7 +173,7 @@ test("the phone line speaks Teltech's format: key first, then { actions } for ea
     const r = await call("/fonory/step?key=hook-secret", "POST", first);
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.actions, [
-      { action: "play", file: "https://dispatch.example/prompts/P01.wav" },
+      { action: "play", file: `https://dispatch.example/prompts/${greetingPrompt(new Date())}.wav` },
       { action: "play", file: "https://dispatch.example/prompts/P04.wav" },
       { action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" },
     ]);

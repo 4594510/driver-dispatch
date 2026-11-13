@@ -21,9 +21,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): for myself or more people (P06; more
   people = how many men, how many women in all, P08/P09, no "together" question: seats are just counted, one gender per
   row), from, to, when, read-back. A family's phone (not set to one person) skips P06 and asks how many men, how many women (0 and up) right away
-  (Shloime, 2026-11-12). A ride back and someone else
-  are under "more options" (2 at the read-back, P69). The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
-  P60-P64 and P68 unused.
+  (Shloime, 2026-11-12). The read-back (P19/P20): 1 books, 2 changes
+  something (P70: people, from, to, time, a ride back, someone else; then back to the read-back), 3 cancels (P71, then
+  the menu) (Shloime, 2026-11-13). P69 unused. The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
+  P60-P64 and P68 unused. The call opens with a greeting for the day, not the line name (src/phone/greeting.js,
+  P72-P82: time of day, Sunday, Rosh Chodesh, Chol Hamoed, Chanukah, Purim, Elul, ...; P01 unused; Shloime, 2026-11-13).
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
@@ -59,11 +61,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/places.js: saved addresses, usable by everyone (codes 1-6 digits, default the house number, 100 reserved). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P69 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P82 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P69 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P82 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
