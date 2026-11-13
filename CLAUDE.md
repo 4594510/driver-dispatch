@@ -25,6 +25,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   P60-P64 and P68 unused.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
+- A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
+  after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
+- Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
+  (notify.js STALE_MINUTES); announcements still wait. Route changes (accept, re-time, reorder) run one at a time.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
   rides on the Now screen with "Take it" / "Can't", one big button per stop.
 

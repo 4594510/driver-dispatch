@@ -156,3 +156,21 @@ test("seats that don't fit the rules: the request still reaches the driver, who 
   assert.ok((await acceptRide(db, travel, later.bookings[0].id, "drv1", settings, now)).ok);
   assert.equal((await refreshDay(db, travel, day, settings, now)).ok, true);
 });
+
+test("two rides accepted at the same moment both end up on the route, or the second is refused", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  // Two full vans for the same time: only one can go.
+  const a = await bookRide(db, travel, ask({ men: 7 }), now, settings);
+  const b = await bookRide(db, travel, ask({ men: 7 }), now, settings);
+  assert.ok(a.ok && b.ok);
+  const out = await Promise.all([a, b].map((r) => acceptRide(db, travel, r.bookings[0].id, "drv1", settings, now)));
+  assert.deepEqual(out.map((o) => o.ok).sort(), [false, true]);
+  assert.equal(dayRoute(db, day).stops.length, 2);
+  // Two small rides at once: both are on the route.
+  const c = await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings);
+  const d = await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings);
+  const both = await Promise.all([c, d].map((r) => acceptRide(db, travel, r.bookings[0].id, "drv1", settings, now)));
+  assert.deepEqual(both.map((o) => o.ok), [true, true]);
+  assert.equal(dayRoute(db, day).stops.length, 6);
+});

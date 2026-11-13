@@ -54,6 +54,8 @@ async function api(path, opts = {}) {
     headers: { ...(opts.body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  // The server restarting (an update) answers 502-504 for a moment: the same as no signal, so the action waits.
+  if (res.status >= 502 && res.status <= 504) throw Object.assign(new Error("server away"), { status: res.status });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== "/api/driver/login") { signOut(true); throw Object.assign(new Error("signed out"), { status: 401 }); }
   return { ok: res.ok, status: res.status, data };

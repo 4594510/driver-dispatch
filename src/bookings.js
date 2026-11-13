@@ -202,7 +202,8 @@ export function changeStatus(db, id, action, actor, now = new Date(), settings =
 export function proposeTime(db, id, minute, driverId) {
   const b = getBooking(db, id);
   if (!b || b.status !== "pending") return { ok: false, errors: ["not_pending"] };
-  db.prepare("UPDATE bookings SET status = 'proposed', proposed_minute = ?, updated_at = ? WHERE id = ?").run(minute, nowIso(), id);
+  // The driver who offered the time is kept: the ride is theirs once the caller agrees.
+  db.prepare("UPDATE bookings SET status = 'proposed', proposed_minute = ?, driver_id = coalesce(?, driver_id), updated_at = ? WHERE id = ?").run(minute, driverId ?? null, nowIso(), id);
   audit(db, `driver:${driverId}`, "proposed_time", id, { minute });
   return { ok: true, booking: getBooking(db, id) };
 }

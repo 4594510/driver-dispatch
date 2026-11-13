@@ -391,12 +391,35 @@ const STEPS = {
       .prepare(`SELECT d.booking_id FROM deliveries d JOIN bookings b ON b.id = d.booking_id WHERE d.phone = ? AND d.kind = 'reminder'
         AND d.status = 'no_answer' AND b.status = 'accepted' AND b.confirmed_by_passenger = 0 AND b.day = ? ORDER BY d.id DESC LIMIT 1`)
       .get(c.from, today(c).day);
+    // The driver offered another time for a ride this phone booked: the caller answers right here (the text says to
+    // call in, and the outgoing call may not have reached them).
+    const offered = c.db
+      .prepare("SELECT * FROM bookings WHERE day = ? AND booked_by_phone = ? AND status = 'proposed' AND proposed_minute IS NOT NULL ORDER BY pickup_minute LIMIT 1")
+      .get(today(c).day, c.from);
+    if (offered) {
+      c.st.offered = offered.id;
+      return ask("time_in", [P("P01"), timeQuestion(c, offered, offered.proposed_minute, offered.pickup_minute)]);
+    }
     if (waiting) {
       c.st.reminder = waiting.booking_id;
       return ask("reminder_in", [P("P01"), P("P05")]);
     }
     // A schedule change today: say it right away (no rides today, or today's other hours).
     return ask("menu", [P("P01"), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
+  },
+  async time_in(c) {
+    const b = c.st.offered ? getBooking(c.db, c.st.offered) : null;
+    if (!b || b.status !== "proposed") return ask("menu", MENU);
+    if (c.keys === "1") return ask("menu", [await agreeTime(c, b, b.proposed_minute), MENU]);
+    if (c.keys === "2") {
+      declineTime(c, b);
+      return ask("menu", [P("P34"), MENU]);
+    }
+    // No answer twice: on to the menu; the question comes again on the next call.
+    c.st.tries ||= {};
+    c.st.tries.time_in = (c.st.tries.time_in || 0) + 1;
+    if (c.st.tries.time_in > TRIES) return ask("menu", MENU);
+    return ask("time_in", [P(c.keys ? "P42" : "P43"), timeQuestion(c, b, b.proposed_minute, b.pickup_minute)]);
   },
   reminder_in(c) {
     if (c.keys === "1" && c.st.reminder) {
@@ -756,6 +779,29 @@ function changeRide(c, b) {
   return ask("change_code", Q.change_code(), CODE_KEYS);
 }
 
+// ---------- the driver offered another time ----------
+const timeQuestion = (c, b, newMinute, oldMinute) =>
+  [P("P38a"), riderPiece(c, b), timeOf(c, newMinute), c.say(W.instead), timeOf(c, oldMinute), P("P38b")];
+// Calls still waiting to ask this are not needed any more.
+const timeAnswered = (c, b) => c.db.prepare("UPDATE deliveries SET status = 'answered', note = 'answered on another call', updated_at = ? WHERE booking_id = ? AND kind = 'time_change' AND status = 'queued'").run(nowIso(), b.id);
+// The caller agrees: the ride moves to the new time and goes on the route. Returns what to say.
+async function agreeTime(c, b, newMinute) {
+  c.db.prepare("UPDATE bookings SET pickup_minute = ?, updated_at = ? WHERE id = ?").run(newMinute, nowIso(), b.id);
+  audit(c.db, `phone:${c.from}`, "agreed_time", b.id, { minute: newMinute });
+  timeAnswered(c, b);
+  const driverId = b.driver_id || c.db.prepare("SELECT id FROM drivers ORDER BY rowid LIMIT 1").get()?.id;
+  const r = await acceptRide(c.db, c.travel, b.id, driverId, c.settings, c.now);
+  if (r.ok) return [P("P39"), P("P31"), timeOf(c, r.booking.eta_minute ?? newMinute)];
+  // It no longer fits: back to the driver as a new request at the new time.
+  c.db.prepare("UPDATE bookings SET status = 'pending', updated_at = ? WHERE id = ?").run(nowIso(), b.id);
+  return [P("P21")];
+}
+function declineTime(c, b) {
+  changeStatus(c.db, b.id, "cancel", `phone:${c.from}`, c.now, c.settings);
+  audit(c.db, `phone:${c.from}`, "declined_time", b.id);
+  timeAnswered(c, b);
+}
+
 // ---------- outgoing ----------
 async function outbound(c) {
   const d = c.db.prepare("SELECT * FROM deliveries WHERE id = ?").get(c.call.delivery_id);
@@ -803,22 +849,16 @@ async function outbound(c) {
     case "time_change": {
       const newMinute = payload.newMinute ?? b?.proposed_minute;
       const oldMinute = payload.oldMinute ?? b?.pickup_minute;
-      const question = [P("P38a"), riderPiece(c, b), timeOf(c, newMinute), c.say(W.instead), timeOf(c, oldMinute), P("P38b")];
+      const question = timeQuestion(c, b, newMinute, oldMinute);
       if (first) return ask(keysStep, question);
       if (!b || b.status !== "proposed") return end([]);
       if (c.keys === "1") {
         key("1");
-        c.db.prepare("UPDATE bookings SET pickup_minute = ?, updated_at = ? WHERE id = ?").run(newMinute, nowIso(), b.id);
-        audit(c.db, `phone:${c.from}`, "agreed_time", b.id, { minute: newMinute });
-        const r = await acceptRide(c.db, c.travel, b.id, b.driver_id, c.settings, c.now);
-        if (r.ok) return end([P("P39"), P("P31"), timeOf(c, r.booking.eta_minute ?? newMinute)]);
-        c.db.prepare("UPDATE bookings SET status = 'pending', updated_at = ? WHERE id = ?").run(nowIso(), b.id);
-        return end([P("P21")]);
+        return end(await agreeTime(c, b, newMinute));
       }
       if (c.keys === "2") {
         key("2");
-        changeStatus(c.db, b.id, "cancel", `phone:${c.from}`, c.now, c.settings);
-        audit(c.db, `phone:${c.from}`, "declined_time", b.id);
+        declineTime(c, b);
         return end([P("P34")]);
       }
       return retry(c, keysStep, question);

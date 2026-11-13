@@ -191,7 +191,7 @@ test("messages: queued by the phone's setting, sent through Fonory, retried when
   assert.equal(queueReminders(db, settings, new Date("2026-11-11T15:11:00Z")), 2);
   assert.equal(queueReminders(db, settings, new Date("2026-11-11T15:12:00Z")), 0);
 
-  assert.equal(await sendDue(db, null), 0, "nothing goes out until Fonory is connected");
+  assert.equal(await sendDue(db, null, now), 0, "nothing goes out until Fonory is connected");
   const calls = [];
   const texts = [];
   const client = { call: async (to, step) => (calls.push([to, step]), `fc${calls.length}`), text: async (to, body) => texts.push([to, body]) };
@@ -493,4 +493,57 @@ test("a code two places share: the caller's own family's place wins, otherwise t
   assert.deepEqual(pick.play.filter((p) => p.language === "english").map((p) => p.say), ["Viznitz", "Walmart"]);
   await step("b", "from_choose", "1");
   assert.equal(st("b").draft.from, "viz");
+});
+
+test("a time the driver offered is answered by calling in: 1 agrees, 2 cancels, and the driver is kept", async () => {
+  const { proposeTime } = await import("../src/bookings.js");
+  const db = setup();
+  await call(db, ["1", "1", "0", "20", "2", "0100", "1"], { id: "a" });
+  const p = db.prepare("SELECT * FROM bookings").get();
+  assert.ok(proposeTime(db, p.id, 810, "drv1").ok);
+  assert.equal(getBooking(db, p.id).driver_id, "drv1", "the driver who offered the time is on the ride");
+  notifyBooking(db, getBooking(db, p.id), "time_change", { oldMinute: 780, newMinute: 810 }, now.toISOString());
+
+  // The caller calls in: the question comes before the menu; a wrong key asks again.
+  const first = await phoneStep(ctx(db), { call_id: "in1", from: "8455550001", step: "start", keys: "" });
+  assert.deepEqual(prompts(first), ["P01", "P38a", "P38b"]);
+  assert.equal(first.gather.step, "time_in");
+  const wrong = await phoneStep(ctx(db), { call_id: "in1", from: "8455550001", step: "time_in", keys: "7" });
+  assert.deepEqual(prompts(wrong), ["P42", "P38a", "P38b"]);
+  const yes = await phoneStep(ctx(db), { call_id: "in1", from: "8455550001", step: "time_in", keys: "1" });
+  assert.deepEqual(prompts(yes), ["P39", "P31", "P04"]);
+  const after = getBooking(db, p.id);
+  assert.equal(after.status, "accepted");
+  assert.equal(after.pickup_minute, 810);
+  assert.equal(after.driver_id, "drv1");
+  // The call that was still waiting to ask is not made any more.
+  assert.equal(db.prepare("SELECT count(*) n FROM deliveries WHERE kind = 'time_change' AND status = 'queued'").get().n, 0);
+  // The next call goes straight to the menu.
+  assert.deepEqual(prompts(await phoneStep(ctx(db), { call_id: "in2", from: "8455550001", step: "start", keys: "" })), ["P01", "P04"]);
+
+  // Another ride, and this time the caller says no: it is cancelled.
+  await call(db, ["1", "1", "0", "20", "2", "0300", "1"], { id: "b" });
+  const q = db.prepare("SELECT * FROM bookings WHERE pickup_minute = 900").get();
+  proposeTime(db, q.id, 930, "drv1");
+  const again = await phoneStep(ctx(db), { call_id: "in3", from: "8455550001", step: "start", keys: "" });
+  assert.equal(again.gather.step, "time_in");
+  const no = await phoneStep(ctx(db), { call_id: "in3", from: "8455550001", step: "time_in", keys: "2" });
+  assert.deepEqual(prompts(no), ["P34", "P04"]);
+  assert.equal(getBooking(db, q.id).status, "cancelled");
+});
+
+test("ride messages that waited over an hour are dropped, not sent late; announcements still go", async () => {
+  const db = setup();
+  await call(db, ["1", "1", "0", "20", "2", "1015", "1"], { id: "a" });
+  const b = db.prepare("SELECT * FROM bookings").get();
+  notifyBooking(db, b, "accepted", {}, now.toISOString());
+  db.prepare("INSERT INTO announcements (id, text, created_by, created_at) VALUES ('an1', 'x', 'admin', ?)").run(now.toISOString());
+  db.prepare("INSERT INTO deliveries (announcement_id, phone, channel, kind, updated_at) VALUES ('an1', '+18455550001', 'text', 'announcement', ?)").run(now.toISOString());
+  const texts = [];
+  const client = { call: async () => "c", text: async (to, body) => texts.push(body) };
+  // The phone line gets connected two hours later.
+  await sendDue(db, client, new Date(now.getTime() + 2 * 3600000));
+  assert.equal(texts.length, 1, "only the announcement goes out");
+  const old = db.prepare("SELECT status, note FROM deliveries WHERE kind = 'accepted'").all();
+  assert.ok(old.length && old.every((d) => d.status === "failed" && d.note === "too old to send"));
 });

@@ -17,6 +17,15 @@ export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
 const NEAR_MINUTES = 90; // legs between stops further apart in time than this are never driven back to back
 
+// One change to the route at a time. Accepting and re-timing wait for Google in the middle, so two at the same moment
+// would each plan from the same old route and the second would wipe out the first (two full vans accepted at once).
+let routeQueue = Promise.resolve();
+const oneAtATime = (fn) => (...args) => {
+  const run = routeQueue.then(() => fn(...args));
+  routeQueue = run.catch(() => {});
+  return run;
+};
+
 export function vehicleFor(db) {
   const v = db.prepare("SELECT * FROM vehicles ORDER BY rowid LIMIT 1").get();
   return { id: v?.id || "main", layout: v ? JSON.parse(v.layout) : DEFAULT_LAYOUT };
@@ -308,7 +317,7 @@ export async function previewAccept(db, travel, id, settings = DEFAULT_SETTINGS,
 
 // The driver accepts: the ride goes into the route, everyone's seats and ETAs are saved.
 // opts.override: take it although the seat rules don't fit (the driver saw the notice).
-export async function acceptRide(db, travel, id, driverId, settings = DEFAULT_SETTINGS, now = new Date(), opts = {}) {
+export const acceptRide = oneAtATime(async (db, travel, id, driverId, settings = DEFAULT_SETTINGS, now = new Date(), opts = {}) => {
   const b = getBooking(db, id);
   if (!b) return { ok: false, errors: ["not_found"] };
   if (!["pending", "proposed"].includes(b.status)) return { ok: false, errors: ["not_pending"] };
@@ -325,10 +334,10 @@ export async function acceptRide(db, travel, id, driverId, settings = DEFAULT_SE
   if (blocks.length) details.blocksPriority = blocks.map((x) => x.id);
   audit(db, `driver:${driverId}`, "accepted", id, details);
   return { ok: true, booking: getBooking(db, id), blocks };
-}
+});
 
 // Re-time the day after a cancel, pickup, drop-off, no-show or address change. Riders on board keep their seats.
-export async function refreshDay(db, travel, day, settings = DEFAULT_SETTINGS, now = new Date()) {
+export const refreshDay = oneAtATime(async (db, travel, day, settings = DEFAULT_SETTINGS, now = new Date()) => {
   const rows = routedRows(db, day);
   await locate(db, travel, rows);
   const ctx = contextFor(db, travel, settings, day, now);
@@ -350,12 +359,12 @@ export async function refreshDay(db, travel, day, settings = DEFAULT_SETTINGS, n
   const seats = useBuilt ? { ok: true, plan: built.seats } : seatRoute(stops, p.rides, p.layout);
   saveRoute(db, day, stops, timing, seats.ok ? seats.plan : null);
   return { ok: true, route: describe(stops, timing), seatProblem: !seats.ok };
-}
+});
 
 // The driver puts the stops in their own order (the app's Day tab). order: [{ booking_id, kind }], the same stops
 // as the saved route. Refused when a drop-off comes before its pickup or the seats can't work; lateness is allowed
 // (the driver chose it) and returned so the app can show it. The order is then kept by later refreshes.
-export async function reorderRoute(db, travel, day, order, settings = DEFAULT_SETTINGS, now = new Date()) {
+export const reorderRoute = oneAtATime(async (db, travel, day, order, settings = DEFAULT_SETTINGS, now = new Date()) => {
   const rows = routedRows(db, day);
   const rides = rows.map(rideOf);
   const stops = (Array.isArray(order) ? order : []).map((s) => ({ ride: String(s.booking_id), kind: s.kind }));
@@ -382,7 +391,7 @@ export async function reorderRoute(db, travel, day, order, settings = DEFAULT_SE
   db.prepare("UPDATE routes SET manual = 1 WHERE day = ? AND vehicle_id = ?").run(day, vehicleFor(db).id);
   audit(db, "system", "route_reordered", null, { day, late: roundAll(timing.late), over: roundAll(timing.over) });
   return { ok: true, route: describe(stops, timing) };
-}
+});
 
 // Back to the planner's order (the driver's "Best order" button).
 export async function autoRoute(db, travel, day, settings = DEFAULT_SETTINGS, now = new Date()) {
