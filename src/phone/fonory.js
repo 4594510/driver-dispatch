@@ -126,8 +126,8 @@ export function toActions(res, base, env = process.env) {
       max_digits: g.max_keys || 1,
       timeout: (g.timeout_s || 6) * 1000,
       tries: 1,
-      // Several keys: # sends them, or 3 seconds after the last key.
-      ...(g.max_keys > 1 ? { terminator: "#", digit_timeout: 3000 } : {}),
+      // Several keys: they are sent 2.5 seconds after the last key (no # needed), or at once with #.
+      ...(g.max_keys > 1 ? { terminator: "#", digit_timeout: 2500 } : {}),
       // # alone is an answer of its own (from / to: say an address), not "no input".
       ...(g.min_keys === 0 ? { min_digits: 0 } : {}),
       action_url: `${base}/fonory/step?step=${encodeURIComponent(g.step)}`,
