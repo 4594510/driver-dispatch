@@ -581,3 +581,31 @@ test("an offered time nobody answers goes back to the driver after 20 minutes", 
   assert.equal(after.proposed_minute, null);
   assert.equal(db.prepare("SELECT count(*) n FROM deliveries WHERE kind = 'time_change' AND status = 'queued'").get().n, 0);
 });
+
+test("a message whose ride changed before it went out is not sent; one cut off by a restart is sent again", async () => {
+  const { changeStatus } = await import("../src/bookings.js");
+  const db = setup();
+  await call(db, ["1", "1", "0", "20", "2", "1015", "1"], { id: "a" });
+  const b = db.prepare("SELECT * FROM bookings").get();
+  await acceptRide(db, travel, b.id, "drv1", settings, now);
+  notifyBooking(db, getBooking(db, b.id), "accepted", {}, now.toISOString());
+  // Cancelled before the "accepted" text and call went out.
+  changeStatus(db, b.id, "cancel", "admin:x", now, settings);
+  notifyBooking(db, getBooking(db, b.id), "cancelled", {}, now.toISOString());
+  const texts = [];
+  const calls = [];
+  const client = { call: async (to, step) => (calls.push(step), "c1"), text: async (to, body) => texts.push(body) };
+  await sendDue(db, client, now);
+  assert.equal(texts.length, 1);
+  assert.match(texts[0], /געקענסלט/);
+  assert.equal(calls.length, 1, "only the cancelled call");
+  assert.ok(db.prepare("SELECT status FROM deliveries WHERE kind = 'accepted'").all().every((d) => d.status === "failed"));
+
+  // A text claimed for sending ten minutes ago (the server restarted in the middle) goes out on the next round.
+  db.prepare("INSERT INTO announcements (id, text, created_by, created_at) VALUES ('an1', 'x', 'admin', 'x')").run();
+  db.prepare("INSERT INTO deliveries (announcement_id, phone, channel, kind, status, updated_at) VALUES ('an1', '+18455550001', 'text', 'announcement', 'sending', ?)")
+    .run(new Date(Date.now() - 10 * 60000).toISOString());
+  await sendDue(db, client, now);
+  assert.equal(texts.length, 2);
+  assert.equal(db.prepare("SELECT status FROM deliveries WHERE kind = 'announcement'").get().status, "sent");
+});

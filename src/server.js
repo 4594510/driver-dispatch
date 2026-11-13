@@ -4,7 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { openDb, newId, nowIso, audit } from "./db.js";
 import { getBooking, expireOffers } from "./bookings.js";
 import { cleanupNow } from "./cleanup.js";
@@ -563,7 +563,8 @@ export function startLoops(db, env = process.env) {
   return setInterval(tick, 20000);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Started directly (npm start), not imported by a test. pathToFileURL so it also matches on Windows.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT) || 3000;
   const db = openDb();
   addPlaceLists(db);

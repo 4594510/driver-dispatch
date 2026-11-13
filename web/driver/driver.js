@@ -138,6 +138,11 @@ async function load() {
     const r = await api("/api/driver/today");
     if (!r.ok) return;
     today = r.data;
+    // Presses still waiting to be sent (made without signal) stay shown as done, until the server has them.
+    for (const q of queue) {
+      const m = /\/bookings\/([^/]+)\/(pickup|done|no_show)$/.exec(q.path);
+      if (m) markLocal(m[1], { pickup: "picked_up", done: "completed", no_show: "no_show" }[m[2]]);
+    }
     lastOk = Date.now();
     store.set("driver.today", today);
     store.set("driver.lastOk", lastOk);

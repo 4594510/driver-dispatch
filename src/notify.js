@@ -64,12 +64,33 @@ export function queueReminders(db, settings = DEFAULT_SETTINGS, now = new Date()
   return n;
 }
 
+// Does a waiting message still fit its ride? A ride cancelled before its "accepted" call went out must not get it.
+const STILL_TRUE = {
+  booked: ["pending", "proposed", "accepted"],
+  accepted: ["accepted"],
+  reminder: ["accepted"],
+  late: ["accepted"],
+  time_change: ["proposed"],
+  not_taken: ["rejected"],
+  cancelled: ["cancelled"],
+};
+function stillTrue(db, d) {
+  if (!d.booking_id || !STILL_TRUE[d.kind]) return true;
+  const b = db.prepare("SELECT status FROM bookings WHERE id = ?").get(d.booking_id);
+  return !!b && STILL_TRUE[d.kind].includes(b.status);
+}
+const CLAIM_MINUTES = 5; // a message claimed for sending this long ago was cut off by a restart
+
 // Send what's due. client: fonoryClient(), or null while Fonory isn't connected (everything waits).
 export async function sendDue(db, client, now = new Date(), log = console.warn) {
   db.prepare(`UPDATE deliveries SET status = 'failed', note = 'too old to send', updated_at = ?
     WHERE status = 'queued' AND booking_id IS NOT NULL AND coalesce(due_at, updated_at) < ?`)
     .run(nowIso(), new Date(now.getTime() - STALE_MINUTES * 60000).toISOString());
   if (!client) return 0;
+  // A restart in the middle of sending left a message claimed: it goes back in the queue (within its tries).
+  db.prepare(`UPDATE deliveries SET status = CASE WHEN attempts + 1 < ? THEN 'queued' ELSE 'failed' END, attempts = attempts + 1,
+    note = 'sending was cut off', updated_at = ? WHERE status = 'sending' AND updated_at < ?`)
+    .run(CALL_TRIES, nowIso(), new Date(Date.now() - CLAIM_MINUTES * 60000).toISOString());
   const rows = db
     .prepare("SELECT * FROM deliveries WHERE status = 'queued' AND (due_at IS NULL OR due_at <= ?) ORDER BY id LIMIT 30")
     .all(now.toISOString());
@@ -78,6 +99,10 @@ export async function sendDue(db, client, now = new Date(), log = console.warn) 
     // Claim it first, so a slow request can't send it twice.
     const claimed = db.prepare("UPDATE deliveries SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'queued'").run(nowIso(), d.id);
     if (!claimed.changes) continue;
+    if (!stillTrue(db, d)) {
+      db.prepare("UPDATE deliveries SET status = 'failed', note = 'the ride changed before this was sent', updated_at = ? WHERE id = ?").run(nowIso(), d.id);
+      continue;
+    }
     try {
       if (d.channel === "text") {
         let body = d.body;

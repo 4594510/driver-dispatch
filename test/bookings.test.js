@@ -32,10 +32,12 @@ test("a ride request is saved as pending, with its return trip", () => {
   assert.equal(db.prepare("SELECT count(*) n FROM audit").get().n, 2);
 });
 
-test("another household's place cannot be used", () => {
+test("another household's place can be used (every saved address is for everyone), a removed one cannot", () => {
   const db = setup();
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('other', 'hh2', '01', 'Home', '9 Other St')").run();
+  assert.ok(requestRide(db, ask({ pickup: { placeId: "other" } }), now).ok);
+  db.prepare("UPDATE places SET active = 0 WHERE id = 'other'").run();
   assert.ok(requestRide(db, ask({ pickup: { placeId: "other" } }), now).errors.includes("no_pickup"));
 });
 
