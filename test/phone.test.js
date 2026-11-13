@@ -547,3 +547,33 @@ test("ride messages that waited over an hour are dropped, not sent late; announc
   const old = db.prepare("SELECT status, note FROM deliveries WHERE kind = 'accepted'").all();
   assert.ok(old.length && old.every((d) => d.status === "failed" && d.note === "too old to send"));
 });
+
+test("the book-it key sent twice at the same moment books the ride once", async () => {
+  const db = setup();
+  const steps = await call(db, ["1", "1", "0", "20", "2", "1015"], { id: "dup" });
+  assert.equal(steps[steps.length - 1].gather.step, "confirm");
+  const press = () => phoneStep(ctx(db), { call_id: "dup", from: "8455550001", step: "confirm", keys: "1" });
+  const [a, b] = await Promise.all([press(), press()]);
+  assert.deepEqual(prompts(a), prompts(b));
+  assert.equal(db.prepare("SELECT count(*) n FROM bookings").get().n, 1);
+  // And once more afterwards (a late repeat): still one ride.
+  await press();
+  assert.equal(db.prepare("SELECT count(*) n FROM bookings").get().n, 1);
+});
+
+test("an offered time nobody answers goes back to the driver after 20 minutes", async () => {
+  const { proposeTime, expireOffers } = await import("../src/bookings.js");
+  const db = setup();
+  await call(db, ["1", "1", "0", "20", "2", "0100", "1"], { id: "a" });
+  const p = db.prepare("SELECT * FROM bookings").get();
+  proposeTime(db, p.id, 810, "drv1", now);
+  notifyBooking(db, getBooking(db, p.id), "time_change", { oldMinute: 780, newMinute: 810 }, now.toISOString());
+  assert.equal(expireOffers(db, new Date(now.getTime() + 19 * 60000)), 0);
+  assert.equal(getBooking(db, p.id).status, "proposed");
+  assert.equal(expireOffers(db, new Date(now.getTime() + 21 * 60000)), 1);
+  const after = getBooking(db, p.id);
+  assert.equal(after.status, "pending");
+  assert.equal(after.pickup_minute, 780);
+  assert.equal(after.proposed_minute, null);
+  assert.equal(db.prepare("SELECT count(*) n FROM deliveries WHERE kind = 'time_change' AND status = 'queued'").get().n, 0);
+});

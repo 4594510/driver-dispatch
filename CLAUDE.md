@@ -29,6 +29,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
   (notify.js STALE_MINUTES); announcements still wait. Route changes (accept, re-time, reorder) run one at a time.
+- An offered time nobody answers goes back to the driver as a waiting request after 20 minutes (bookings.js
+  expireOffers). The "book it" key sent twice in one call books once. Once a day old GPS points, call rows, sent
+  messages and logs are removed (src/cleanup.js). .github/workflows/test.yml runs the tests on every pull request.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
   rides on the Now screen with "Take it" / "Can't", one big button per stop.
 

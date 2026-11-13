@@ -176,6 +176,19 @@ export function acceptBooking(db, id, driverId, settings = DEFAULT_SETTINGS) {
   return { ok: true, booking: getBooking(db, id) };
 }
 
+// A time the driver offered that the caller hasn't answered after OFFER_MINUTES goes back to the driver as a waiting
+// request at its first time (the app shows it as a new ride again), and the calls still trying to ask are stopped.
+export const OFFER_MINUTES = 20;
+export function expireOffers(db, now = new Date()) {
+  const rows = db.prepare("SELECT id FROM bookings WHERE status = 'proposed' AND updated_at < ?").all(new Date(now.getTime() - OFFER_MINUTES * 60000).toISOString());
+  for (const { id } of rows) {
+    db.prepare("UPDATE bookings SET status = 'pending', proposed_minute = NULL, updated_at = ? WHERE id = ? AND status = 'proposed'").run(now.toISOString(), id);
+    db.prepare("UPDATE deliveries SET status = 'failed', note = 'no answer to the offered time', updated_at = ? WHERE booking_id = ? AND kind = 'time_change' AND status = 'queued'").run(now.toISOString(), id);
+    audit(db, "system", "offer_expired", id);
+  }
+  return rows.length;
+}
+
 const TRANSITIONS = {
   reject: { from: ["pending", "proposed"], to: "rejected" },
   cancel: { from: ["pending", "proposed", "accepted"], to: "cancelled" },
@@ -199,11 +212,11 @@ export function changeStatus(db, id, action, actor, now = new Date(), settings =
 }
 
 // The driver suggests another pickup time; the passenger is asked to approve it.
-export function proposeTime(db, id, minute, driverId) {
+export function proposeTime(db, id, minute, driverId, now = new Date()) {
   const b = getBooking(db, id);
   if (!b || b.status !== "pending") return { ok: false, errors: ["not_pending"] };
   // The driver who offered the time is kept: the ride is theirs once the caller agrees.
-  db.prepare("UPDATE bookings SET status = 'proposed', proposed_minute = ?, driver_id = coalesce(?, driver_id), updated_at = ? WHERE id = ?").run(minute, driverId ?? null, nowIso(), id);
+  db.prepare("UPDATE bookings SET status = 'proposed', proposed_minute = ?, driver_id = coalesce(?, driver_id), updated_at = ? WHERE id = ?").run(minute, driverId ?? null, now.toISOString(), id);
   audit(db, `driver:${driverId}`, "proposed_time", id, { minute });
   return { ok: true, booking: getBooking(db, id) };
 }

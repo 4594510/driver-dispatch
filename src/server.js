@@ -6,7 +6,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { openDb, newId, nowIso, audit } from "./db.js";
-import { getBooking } from "./bookings.js";
+import { getBooking, expireOffers } from "./bookings.js";
+import { cleanupNow } from "./cleanup.js";
 import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel, AREA_KM } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
@@ -546,9 +547,13 @@ export function startLoops(db, env = process.env) {
     busy = true;
     try {
       queueReminders(db, getSettings(db));
+      expireOffers(db);
       await sendDue(db, client);
       if (speak) await makeWanted(db, dir, speak, { limit: 10 });
-      if (backupDue(backups)) backupNow(db, backups, Number(env.BACKUP_KEEP) || 14);
+      if (backupDue(backups)) {
+        backupNow(db, backups, Number(env.BACKUP_KEEP) || 14);
+        cleanupNow(db); // once a day, after the copy
+      }
     } catch (e) {
       console.error("background work failed:", e);
     } finally {
