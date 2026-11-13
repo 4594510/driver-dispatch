@@ -362,7 +362,18 @@ function refusalOf(c, code) {
   return P(REFUSALS[code] || "P42");
 }
 
+// The "book it" key sent twice for one call (Teltech asks again when our answer was slow): the ride is booked once and
+// both get the same answer.
+const booking = new Map();
 async function book(c) {
+  const id = c.call.call_id;
+  if (!booking.has(id)) booking.set(id, bookOnce(c).finally(() => booking.delete(id)));
+  const out = await booking.get(id);
+  if (out.booked) c.st.draft = null;
+  else if (out.offer != null) c.st.offer = out.offer;
+  return out.res;
+}
+async function bookOnce(c) {
   const d = c.st.draft;
   const input = {
     phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", riders: namedIds(d), men: d.men, women: d.women,
@@ -372,16 +383,15 @@ async function book(c) {
   };
   const r = await bookRide(c.db, c.travel, input, c.now, c.settings, `phone:${c.phone.number}`);
   if (r.ok) {
-    c.st.draft = null;
     for (const b of r.bookings) c.notify?.(b, "booked");
-    return end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]);
+    return { booked: true, res: end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]) };
   }
   const refusal = refusalOf(c, r.errors[0]);
   if (r.suggestions?.length) {
-    c.st.offer = r.suggestions[0];
-    return ask("offer", [refusal, P("P27"), timeOf(c, c.st.offer), P("P27b")]);
+    const offer = r.suggestions[0];
+    return { offer, res: ask("offer", [refusal, P("P27"), timeOf(c, offer), P("P27b")]) };
   }
-  return end([refusal]);
+  return { res: end([refusal]) };
 }
 
 const STEPS = {
