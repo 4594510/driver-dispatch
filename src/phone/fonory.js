@@ -109,7 +109,11 @@ export function toActions(res, base, env = process.env) {
   }
   // A spoken answer (a one-time address): their "collect" of the caller's voice, turned into text.
   if (res.listen && !res.hangup) {
+    // Barge-in (Teltech IVR-945, live 2026-11-12): the caller may start speaking while the collect's own prompt
+    // plays, so the last piece played before listening becomes that prompt.
+    const prompt = actions.length ? actions.pop() : undefined;
     actions.push({
+      ...(prompt ? { prompt } : {}),
       // Street names are English even when the caller speaks Yiddish; FONORY_TRANSCRIBE_LANGUAGE=auto lets Teltech guess.
       // beep: false (Teltech, 2026-11-12): no tone, the caller speaks right after our prompt; silence ends it.
       action: "collect", type: "voice", id: "address", transcribe: true, beep: false,
