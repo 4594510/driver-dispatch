@@ -302,9 +302,12 @@ test("a caller is known by a family's phone or one person's phone; a family's ph
   assert.deepEqual(prompts(fam[1]), ["P08"]);
   assert.deepEqual(prompts(fam[2]), ["P09"]);
   assert.deepEqual(prompts(fam[3]), ["P11"]);
-  // 0 men and 0 women asks again.
-  const zero = await call(db, ["1", "0", "0"], { from: "8455550002", id: "me4" });
-  assert.deepEqual(prompts(zero[3]).slice(-1), ["P08"]);
+  // 0 men and 0 women: a package only, said at the read-back, booked with no riders.
+  const pkg = await call(db, ["1", "0", "0", "0", "20", "2", "1245", "1"], { from: "8455550002", id: "me4" });
+  assert.deepEqual(prompts(pkg[3]), ["P11"]);
+  assert.ok(said(pkg[7]).includes("נאר א פעקל"), JSON.stringify(said(pkg[7])));
+  assert.ok(!said(pkg[7]).some((x) => /מענער|פרויען/.test(x)));
+  assert.deepEqual(prompts(pkg[8]).slice(0, 1), ["P21"]);
   // A family with nobody entered yet: the same.
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
   db.prepare("INSERT INTO phones (number, household_id, notify) VALUES ('+18455550003', 'hh2', 'both')").run();
@@ -315,6 +318,7 @@ test("a caller is known by a family's phone or one person's phone; a family's ph
   assert.deepEqual(rows, [
     { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1", men: 1, women: 0 },
     { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null, men: 0, women: 1 },
+    { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null, men: 0, women: 0 },
     { booked_by_phone: "+18455550003", household_id: "hh2", passenger_id: null, men: 1, women: 0 },
   ]);
 });
