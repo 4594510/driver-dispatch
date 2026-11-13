@@ -25,7 +25,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   something (P70: people, from, to, time, a ride back, someone else; then back to the read-back), 3 cancels (P71, then
   the menu) (Shloime, 2026-11-13). P69 unused. The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
   P60-P64 and P68 unused. The call opens with a greeting for the day, not the line name (src/phone/greeting.js,
-  P72-P82: time of day, Sunday, Rosh Chodesh, Chol Hamoed, Chanukah, Purim, Elul, ...; P01 unused; Shloime, 2026-11-13).
+  P72-P79, P82-P83: time of day, Rosh Chodesh, Chol Hamoed, Chanukah, Purim, erev Shabbos, erev Yom Tov, a gute
+  voch only on motzei Shabbos; P01 unused). The goodbye in Elul / until Yom Kippur is P80/P81 instead of P41 (Shloime, 2026-11-13).
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
@@ -61,11 +62,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/places.js: saved addresses, usable by everyone (codes 1-6 digits, default the house number, 100 reserved). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P82 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P83 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P82 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P83 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
