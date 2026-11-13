@@ -3,7 +3,7 @@
 // Fonory (sendDue); a call nobody answered is tried again for the kinds that need an answer (reminder, time change).
 import { audit, nowIso } from "./db.js";
 import { localParts, DEFAULT_SETTINGS } from "./rules.js";
-import { TEXTS, timeText } from "./phone/words.js";
+import { TEXTS, timeText, W } from "./phone/words.js";
 
 export const RETRY_KINDS = ["reminder", "time_change"];
 export const CALL_TRIES = 3; // the first call and 2 more
@@ -20,7 +20,8 @@ function rideInfo(db, b, payload = {}) {
     return row ? row.spoken || row.name : address;
   };
   return {
-    name: p ? p.spoken || p.name : b.rider_name || "",
+    // A package only (0 men, 0 women) is named in Yiddish, not by its English note.
+    name: p ? p.spoken || p.name : !b.men && !b.women ? W.package : b.rider_name || "",
     from: place(b.pickup_place_id, b.pickup_address),
     to: place(b.dropoff_place_id, b.dropoff_address),
     time: timeText(payload.minute ?? b.eta_minute ?? b.pickup_minute),

@@ -123,6 +123,7 @@ export const W = {
   tomorrow: "מארגן",
   yesterday: "נעכטן",
   added: "צוגעלייגט",
+  package: "נאר א פעקל", // a package only: 0 men and 0 women
 };
 
 // Dates for the schedule: "מאנטאג", or "מאנטאג נאוועמבער זעכצן" further ahead.

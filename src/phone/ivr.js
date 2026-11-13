@@ -124,6 +124,7 @@ function endPiece(c, placeId, address) {
 }
 function riderPiece(c, b) {
   const p = b.passenger_id ? c.db.prepare("SELECT * FROM passengers WHERE id = ?").get(b.passenger_id) : null;
+  if (!p && !b.men && !b.women) return c.say(W.package);
   return p ? c.name(p) : b.rider_name ? c.say(b.rider_name) : null;
 }
 function peopleOf(c, men, women) {
@@ -316,6 +317,7 @@ function askCounts(c) {
   d.extraMen = 0;
   d.extraWomen = 0;
   d.together = false;
+  d.package = false;
   return ask("men", Q.men());
 }
 function allMayMix(c) {
@@ -346,7 +348,7 @@ function readBack(c) {
   const people = named.length
     ? [named.map((p, i) => [i && i === named.length - 1 ? c.say(W.and) : null, c.name(p)]),
       d.extraMen || d.extraWomen ? [c.say(W.and), peopleOf(c, d.extraMen, d.extraWomen)] : null]
-    : peopleOf(c, d.men, d.women);
+    : d.package ? c.say(W.package) : peopleOf(c, d.men, d.women);
   return [
     P("P19"), people,
     c.say(W.from), endPiece(c, d.from, d.fromAddress?.address), c.say(W.to), endPiece(c, d.to, d.toAddress?.address),
@@ -383,7 +385,7 @@ async function bookOnce(c) {
   const d = c.st.draft;
   const input = {
     phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", riders: namedIds(d), men: d.men, women: d.women,
-    together: !!d.together,
+    together: !!d.together, package: !!d.package,
     pickup: d.from ? { placeId: d.from } : d.fromAddress, dropoff: d.to ? { placeId: d.to } : d.toAddress, pickupMinute: d.pickupMinute ?? null, window: d.window,
     returnMinute: d.returnMinute ?? undefined,
   };
@@ -554,7 +556,8 @@ const STEPS = {
     const n = Number(c.keys);
     if (c.keys === "" || !(n >= 0 && n <= 6)) return retry(c, "women", Q.women());
     const d = c.st.draft;
-    if (n + d.men === 0) return retry(c, "men", Q.men());
+    // 0 men and 0 women: a package only (no riders, no seats).
+    d.package = n + d.men === 0;
     d.women = n;
     if (d.men + n > 7) return end([P("P23")]);
     // The rider named on the ride (a person's own phone) only when the counts include them: someone may book for others.
