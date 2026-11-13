@@ -398,3 +398,16 @@ test("code fixes: Walmart to 250 and Dr Lebowitz to 400, once; a removed one com
   fixCodes(db, { "t": [["dr lebowitz", "400"]] }, () => {});
   assert.equal(db.prepare("SELECT code FROM places WHERE id = 'd'").get().code, "41", "runs once");
 });
+
+test("removing a family also removes its phones, people and places", async () => {
+  await withServer(async (call, db) => {
+    await signIn(call);
+    const hh = (await call("/api/admin/households", "POST", { name: "Family Gone" })).body.id;
+    await call("/api/admin/phones", "POST", { number: "845-555-0077", householdId: hh });
+    await call("/api/admin/places", "POST", { householdId: hh, code: "77", name: "Home", address: "1 Example Ln", kind: "home" });
+    assert.equal(db.prepare("SELECT count(*) n FROM places WHERE household_id = ? AND active = 1").get(hh).n, 1);
+    assert.equal((await call(`/api/admin/households/${hh}`, "DELETE")).status, 200);
+    assert.equal(db.prepare("SELECT count(*) n FROM places WHERE household_id = ? AND active = 1").get(hh).n, 0);
+    assert.equal(db.prepare("SELECT count(*) n FROM phones WHERE household_id = ? AND active = 1").get(hh).n, 0);
+  });
+});

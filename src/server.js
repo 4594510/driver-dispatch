@@ -204,6 +204,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     db.prepare("UPDATE households SET active = 0 WHERE id = ?").run(id);
     db.prepare("UPDATE phones SET active = 0 WHERE household_id = ?").run(id);
     db.prepare("UPDATE passengers SET active = 0 WHERE household_id = ?").run(id);
+    db.prepare("UPDATE places SET active = 0 WHERE household_id = ?").run(id); // its home is no longer offered on the phone
     audit(db, req.actor, "household_removed", null, { id });
     res.json({ ok: true });
   });

@@ -9,6 +9,9 @@ export const RETRY_KINDS = ["reminder", "time_change"];
 export const CALL_TRIES = 3; // the first call and 2 more
 const RETRY_MINUTES = 1;
 const TEXT_ONLY = ["booked"]; // no call for these
+// News about a ride is worth nothing an hour later ("your driver comes in 5 minutes"). Messages that waited longer
+// (the phone line wasn't connected, or was down) are dropped, not sent late. Announcements still wait.
+export const STALE_MINUTES = 60;
 
 function rideInfo(db, b, payload = {}) {
   const p = b.passenger_id ? db.prepare("SELECT * FROM passengers WHERE id = ?").get(b.passenger_id) : null;
@@ -63,6 +66,9 @@ export function queueReminders(db, settings = DEFAULT_SETTINGS, now = new Date()
 
 // Send what's due. client: fonoryClient(), or null while Fonory isn't connected (everything waits).
 export async function sendDue(db, client, now = new Date(), log = console.warn) {
+  db.prepare(`UPDATE deliveries SET status = 'failed', note = 'too old to send', updated_at = ?
+    WHERE status = 'queued' AND booking_id IS NOT NULL AND coalesce(due_at, updated_at) < ?`)
+    .run(nowIso(), new Date(now.getTime() - STALE_MINUTES * 60000).toISOString());
   if (!client) return 0;
   const rows = db
     .prepare("SELECT * FROM deliveries WHERE status = 'queued' AND (due_at IS NULL OR due_at <= ?) ORDER BY id LIMIT 30")
