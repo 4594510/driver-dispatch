@@ -234,6 +234,8 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   assert.equal(collect.transcribe, true);
   assert.equal(collect.transcribe_language, "en");
   assert.equal(collect.beep, false, "no tone: the caller just speaks after the prompt");
+  assert.deepEqual(collect.prompt, { action: "play", file: "https://d.example/prompts/P56.wav" }, "the question is the collect's own prompt, so the caller may talk over it");
+  assert.ok(!out.actions.slice(0, -1).some((a) => a.file?.endsWith("P56.wav")), "not played twice");
   assert.equal(collect.action_url, "https://d.example/fonory/step?step=from_say");
   assert.equal(out.actions.some((a) => a.action === "hangup"), false);
   const step = readStep({ query: { step: "from_say" }, body: { event: "collect", call_id: "c", caller_id: "18455550001", field_id: "address", field_transcript: "12 Main Street Monsey" } });
