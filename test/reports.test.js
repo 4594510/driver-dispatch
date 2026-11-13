@@ -37,5 +37,7 @@ test("the daily backup is a readable copy, and old copies are removed", async ()
   assert.equal(backupDue(out, new Date("2026-11-04T20:00:00Z")), false);
   const copy = openDb(path.join(out, "dispatch-2026-11-04-05-00-00.db"));
   assert.equal(copy.prepare("SELECT name FROM households").get().name, "A");
+  copy.close();
+  db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

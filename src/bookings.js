@@ -66,9 +66,8 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
   const place = (p) => {
     if (!p) return null;
     if (p.placeId) {
-      const row = db
-        .prepare("SELECT * FROM places WHERE id = ? AND active = 1 AND (household_id IS NULL OR household_id = ?)")
-        .get(p.placeId, phone.household_id);
+      // Every saved address can be used by everyone (places.js): the phone offers them all, so booking takes them all.
+      const row = db.prepare("SELECT * FROM places WHERE id = ? AND active = 1").get(p.placeId);
       return row ? { id: row.id, address: row.address, lat: row.lat, lng: row.lng } : null;
     }
     // A one-time address (not saved to the family's places), with its map point when the caller's side found it.
