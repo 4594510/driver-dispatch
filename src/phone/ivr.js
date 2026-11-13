@@ -3,7 +3,7 @@
 // { play: [{ prompt } | { audio } | { say }], gather?: { step, max_keys, timeout_s }, hangup }; src/phone/fonory.js
 // (readStep, toActions) translates to and from Teltech's Ride Line format.
 // Where the caller is (the ride being ordered, the list just read out) is kept per call in phone_calls.
-import { greetingPrompt } from "./greeting.js";
+import { greetingPrompt, farewellPrompt } from "./greeting.js";
 import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
@@ -65,6 +65,9 @@ export async function phoneStep(ctx, body) {
   const c = { ...ctx, call, st, keys, step, from, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name };
   const res = call.delivery_id ? await outbound(c) : await inbound(c);
   db.prepare("UPDATE phone_calls SET state = ?, updated_at = ? WHERE call_id = ?").run(JSON.stringify(st), nowIso(), callId);
+  // Goodbye with the wish of the days (Elul, the Ten Days of Teshuva) instead of the usual "a good day".
+  const bye = farewellPrompt(c.now, c.settings.timeZone);
+  if (bye !== "P41" && res.hangup) res.play = [res.play].flat(Infinity).map((p) => (p?.prompt === "P41" ? P(bye) : p));
   return clean(res);
 }
 

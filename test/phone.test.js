@@ -617,3 +617,10 @@ test("a message whose ride changed before it went out is not sent; one cut off b
   assert.equal(texts.length, 2);
   assert.equal(db.prepare("SELECT status FROM deliveries WHERE kind = 'announcement'").get().status, "sent");
 });
+
+test("in Elul the goodbye wishes a kesiva vachasima tova (Shloime, 2026-11-13)", async () => {
+  const db = setup();
+  const r = await call(db, ["7", "", "8"], { extra: { now: new Date("2027-09-14T15:00:00Z") } });
+  assert.deepEqual(prompts(r[3]), ["P80"]);
+  assert.equal(r[3].hangup, true);
+});
