@@ -187,9 +187,9 @@ test("the phone line speaks Teltech's format: key first, then { actions } for ea
 test("Teltech's requests and our answers translate both ways", () => {
   const req = (query, body) => ({ query, body });
   assert.deepEqual(readStep(req({}, { event: "new_call", call_id: "c", caller_id: "18455550142", digits: "" })),
-    { call_id: "c", from: "18455550142", direction: "inbound", step: "start", keys: "" });
+    { call_id: "c", from: "18455550142", direction: "inbound", step: "start", keys: "", event: "new_call" });
   assert.deepEqual(readStep(req({ step: "time" }, { event: "gather", call_id: "c", caller_id: "18455550142", digits: "0230" })),
-    { call_id: "c", from: "18455550142", direction: "inbound", step: "time", keys: "0230" });
+    { call_id: "c", from: "18455550142", direction: "inbound", step: "time", keys: "0230", event: "gather" });
   assert.equal(readStep(req({}, { event: "outbound_answered", call_id: "o", caller_id: "1845", start: "out:7" })).step, "out:7");
   assert.equal(readStep(req({}, { event: "outbound_answered", call_id: "o", caller_id: "1845", start: "out:7" })).direction, "outbound");
   const base = "https://d.example";
@@ -233,11 +233,21 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   assert.equal(collect.type, "voice");
   assert.equal(collect.transcribe, true);
   assert.equal(collect.transcribe_language, "en");
+  assert.equal(collect.beep, false, "no tone: the caller just speaks after the prompt");
   assert.equal(collect.action_url, "https://d.example/fonory/step?step=from_say");
   assert.equal(out.actions.some((a) => a.action === "hangup"), false);
   const step = readStep({ query: { step: "from_say" }, body: { event: "collect", call_id: "c", caller_id: "18455550001", field_id: "address", field_transcript: "12 Main Street Monsey" } });
   assert.equal(step.transcript, "12 Main Street Monsey");
   assert.equal(step.step, "from_say");
+  // The words may also come as the call variable address_text, or as a text field_value; a recording path is not words.
+  const body = { event: "collect", call_id: "c", caller_id: "18455550001", field_id: "address" };
+  assert.equal(readStep({ query: {}, body: { ...body, address_text: "7 Ronald Dr" } }).transcript, "7 Ronald Dr");
+  assert.equal(readStep({ query: {}, body: { ...body, variables: { address_text: "7 Ronald Dr" } } }).transcript, "7 Ronald Dr");
+  assert.equal(readStep({ query: {}, body: { ...body, field_value: "7 Ronald Dr" } }).transcript, "7 Ronald Dr");
+  assert.equal(readStep({ query: {}, body: { ...body, field_value: "18457315290/2/1/recordings/c_address_1.wav" } }).transcript, "");
+  // From and to: # alone is an answer (min_digits 0), so it reaches us as "say an address".
+  const fromQ = toActions({ play: [], gather: { step: "from", max_keys: 6, timeout_s: 6, min_keys: 0 } }, "https://d.example", {});
+  assert.equal(fromQ.actions.at(-1).min_digits, 0);
   const english = toActions({ play: [{ say: "12 Main Street, Monsey", language: "english" }], hangup: true }, "https://d.example", {});
   assert.equal(english.actions[0].language, "english");
 });

@@ -10,7 +10,7 @@ import { getBooking } from "./bookings.js";
 import { bookRide, previewAccept, refreshDay, dayRoute } from "./dispatch.js";
 import { createTravel, AREA_KM } from "./travel.js";
 import { phoneStep } from "./phone/ivr.js";
-import { webhookAllowed, fromTeltech, fonoryClient, readStep, toActions } from "./phone/fonory.js";
+import { webhookAllowed, fromTeltech, fonoryClient, readStep, toActions, stepLine } from "./phone/fonory.js";
 import { yiddishVoice } from "./phone/yiddishtools.js";
 import { makeWanted, wantAll } from "./phone/audio.js";
 import { allPieces } from "./phone/words.js";
@@ -78,7 +78,12 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   fonory.post("/step", async (req, res) => {
     try {
       const base = baseUrl(req);
-      res.json(toActions(await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base, notify }, readStep(req)), base, env));
+      const s = readStep(req);
+      const answer = await phoneStep({ db, travel, settings: getSettings(db, clock()), now: clock(), base, notify }, s);
+      console.log(stepLine(s, answer));
+      // A spoken answer: which fields Teltech sent (names only), until we know their exact shape.
+      if (s.event === "collect") console.log(`phone collect fields: ${Object.keys(req.body || {}).join(",")}`);
+      res.json(toActions(answer, base, env));
     } catch (e) {
       console.error("phone step failed:", e);
       res.json(toActions({ play: [{ prompt: "P03" }], hangup: true }, baseUrl(req), env));

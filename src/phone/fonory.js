@@ -76,8 +76,25 @@ export function readStep(req) {
     step: step || "start",
     keys: b.digits ?? b.keys ?? "",
     // A spoken answer (their "collect" with transcribe): what the caller said, as text.
-    ...(b.event === "collect" || b.field_transcript != null || b.transcript != null ? { transcript: String(b.field_transcript ?? b.transcript ?? "") } : {}),
+    ...(b.event === "collect" || b.field_transcript != null || b.transcript != null ? { transcript: transcriptOf(b) } : {}),
+    event: b.event,
   };
+}
+// The words of a spoken answer: field_transcript by their guide; also the call variable <id>_text, and a field_value
+// that is text and not a recording path, in case the box sends it there.
+function transcriptOf(b) {
+  const id = b.field_id || "address";
+  const value = typeof b.field_value === "string" && !/\.(wav|mp3)$/i.test(b.field_value) ? b.field_value : null;
+  const t = b.field_transcript ?? b.transcript ?? b[`${id}_text`] ?? b.variables?.[`${id}_text`] ?? b.collected?.[`${id}_text`] ?? value ?? "";
+  return String(t);
+}
+
+// One line per phone step in the server log, to see what a call did (the caller by the last 4 digits only).
+export function stepLine(s, res) {
+  const said = s.transcript != null ? ` heard="${String(s.transcript).slice(0, 80)}"` : "";
+  const next = res?.listen ? `listen:${res.listen.step}` : res?.gather ? `ask:${res.gather.step}` : "end";
+  const prompts = (res?.play || []).filter((p) => p.prompt).map((p) => p.prompt).join(",");
+  return `phone ${String(s.call_id || "").slice(-6)} ..${String(s.from || "").slice(-4)} ${s.event || ""} step=${s.step} keys="${s.keys}"${said} -> ${next} [${prompts}]`;
 }
 
 // Our answer ({ play, gather, hangup }) as their { actions }. Fixed prompts are played from our own server
@@ -94,7 +111,8 @@ export function toActions(res, base, env = process.env) {
   if (res.listen && !res.hangup) {
     actions.push({
       // Street names are English even when the caller speaks Yiddish; FONORY_TRANSCRIBE_LANGUAGE=auto lets Teltech guess.
-      action: "collect", type: "voice", id: "address", transcribe: true,
+      // beep: false (Teltech, 2026-11-12): no tone, the caller speaks right after our prompt; silence ends it.
+      action: "collect", type: "voice", id: "address", transcribe: true, beep: false,
       ...((env.FONORY_TRANSCRIBE_LANGUAGE || "en") !== "auto" ? { transcribe_language: env.FONORY_TRANSCRIBE_LANGUAGE || "en" } : {}),
       max_duration: res.listen.max_s || 20, silence_timeout: 3, timeout: 10000,
       action_url: `${base}/fonory/step?step=${encodeURIComponent(res.listen.step)}`,
@@ -110,6 +128,8 @@ export function toActions(res, base, env = process.env) {
       tries: 1,
       // Several keys: # sends them, or 3 seconds after the last key.
       ...(g.max_keys > 1 ? { terminator: "#", digit_timeout: 3000 } : {}),
+      // # alone is an answer of its own (from / to: say an address), not "no input".
+      ...(g.min_keys === 0 ? { min_digits: 0 } : {}),
       action_url: `${base}/fonory/step?step=${encodeURIComponent(g.step)}`,
     });
   } else actions.push({ action: "hangup" });
