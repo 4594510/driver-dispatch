@@ -459,6 +459,13 @@ const STEPS = {
       settle(c, "menu");
       return listen("add_say", [P("P56")]);
     }
+    // Key 7: send or get a package (no riders, no seats): straight to from, to, when (Shloime, 2026-11-13).
+    if (c.keys === "7") {
+      settle(c, "menu");
+      if (c.settings.closed) return ask("menu", [P("P49"), MENU]);
+      c.st.draft = { men: 0, women: 0, package: true };
+      return ask("from", Q.from());
+    }
     if (c.keys === "2") return myRides(c);
     if (c.keys === "3") return cancelList(c);
     if (c.keys === "4") {

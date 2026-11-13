@@ -147,7 +147,7 @@ test("more people: just how many men and women in all, no 'together' question; a
 
 test("wrong keys are asked again, and twice wrong says goodbye", async () => {
   const db = setup();
-  const r = await call(db, ["7", "", "8"]);
+  const r = await call(db, ["8", "", "8"]);
   assert.deepEqual(prompts(r[1]), ["P42", "P04"]);
   assert.deepEqual(prompts(r[2]), ["P43", "P04"]);
   assert.deepEqual(prompts(r[3]), ["P41"]);
@@ -308,6 +308,11 @@ test("a caller is known by a family's phone or one person's phone; a family's ph
   assert.ok(said(pkg[7]).includes("נאר א פעקל"), JSON.stringify(said(pkg[7])));
   assert.ok(!said(pkg[7]).some((x) => /מענער|פרויען/.test(x)));
   assert.deepEqual(prompts(pkg[8]).slice(0, 1), ["P21"]);
+  // Main menu key 7: a package, straight to from (any phone, also a person's own phone).
+  const seven = await call(db, ["7", "0", "20", "2", "1250", "1"], { from: "8455550001", id: "me5" });
+  assert.deepEqual(prompts(seven[1]), ["P11"]);
+  assert.ok(said(seven[5]).includes("נאר א פעקל"));
+  assert.deepEqual(prompts(seven[6]).slice(0, 1), ["P21"]);
   // A family with nobody entered yet: the same.
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
   db.prepare("INSERT INTO phones (number, household_id, notify) VALUES ('+18455550003', 'hh2', 'both')").run();
@@ -319,6 +324,7 @@ test("a caller is known by a family's phone or one person's phone; a family's ph
     { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1", men: 1, women: 0 },
     { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null, men: 0, women: 1 },
     { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null, men: 0, women: 0 },
+    { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: null, men: 0, women: 0 },
     { booked_by_phone: "+18455550003", household_id: "hh2", passenger_id: null, men: 1, women: 0 },
   ]);
 });
@@ -624,7 +630,7 @@ test("a message whose ride changed before it went out is not sent; one cut off b
 
 test("in Elul the goodbye wishes a kesiva vachasima tova (Shloime, 2026-11-13)", async () => {
   const db = setup();
-  const r = await call(db, ["7", "", "8"], { extra: { now: new Date("2027-09-14T15:00:00Z") } });
+  const r = await call(db, ["8", "", "8"], { extra: { now: new Date("2027-09-14T15:00:00Z") } });
   assert.deepEqual(prompts(r[3]), ["P80"]);
   assert.equal(r[3].hangup, true);
 });
