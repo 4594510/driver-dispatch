@@ -286,8 +286,10 @@ function onward(c, next) {
 }
 // Who rides: a phone of one person books that person; a family's phone picks a name; a family with nobody entered
 // just says how many men and women.
-// First question (Shloime, 2026-11-12): for yourself, or more people (then just how many men and women in all).
+// A person's own phone: for yourself, or more people (then just how many men and women in all).
+// A family's phone goes straight to how many men and how many women (Shloime, 2026-11-12).
 function startRide(c) {
+  if (!c.phone.passenger_id) return askCounts(c);
   return ask("who", Q.who());
 }
 // "For myself": a person's own phone is that person; a family's phone picks the name; a family with nobody entered

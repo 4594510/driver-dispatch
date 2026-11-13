@@ -20,7 +20,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   P17 unused), max 30 minutes driving. The "#" tip (P67) is not said any more.
 - Phone booking is the short way (Shloime, 2026-11-12: "quick, easy, simple"): for myself or more people (P06; more
   people = how many men, how many women in all, P08/P09, no "together" question: seats are just counted, one gender per
-  row), from, to, when, read-back. "For myself" on a family's phone picks the name (P07). A ride back and someone else
+  row), from, to, when, read-back. A family's phone (not set to one person) skips P06 and asks how many men, how many women (0 and up) right away
+  (Shloime, 2026-11-12). A ride back and someone else
   are under "more options" (2 at the read-back, P69). The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
   P60-P64 and P68 unused.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,

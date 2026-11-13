@@ -283,26 +283,30 @@ test("with the driver offline, the caller hears the ride waits unconfirmed", asy
   assert.deepEqual(prompts(r[r.length - 1]), ["P22", "P41"]);
 });
 
-test("a caller is known by a family's phone or one person's phone; a family's phone picks who rides", async () => {
+test("a caller is known by a family's phone or one person's phone; a family's phone says how many men and women", async () => {
   const db = setup();
   db.prepare("INSERT INTO phones (number, household_id, passenger_id, notify) VALUES ('+18455550002', 'hh1', NULL, 'both')").run();
-  // One person's phone: that person, no question.
-  await call(db, ["1", "1", "0", "20", "2", "1200", "1"], { from: "8455550001", id: "me1" });
-  // The family's phone: 1 for myself, then the names: 2 Rivka.
-  const fam = await call(db, ["1", "1", "2", "0", "20", "2", "1230", "1"], { from: "845-555-0002", id: "me2" });
-  assert.deepEqual(prompts(fam[1]), ["P06"]);
-  assert.deepEqual(prompts(fam[2]), ["P07"]);
+  // One person's phone: for myself (1), that person, no names.
+  const me = await call(db, ["1", "1", "0", "20", "2", "1200", "1"], { from: "8455550001", id: "me1" });
+  assert.deepEqual(prompts(me[1]), ["P06"]);
+  // The family's phone goes straight to how many men (0) and women (1), 0 and up (Shloime, 2026-11-12).
+  const fam = await call(db, ["1", "0", "1", "0", "20", "2", "1230", "1"], { from: "845-555-0002", id: "me2" });
+  assert.deepEqual(prompts(fam[1]), ["P08"]);
+  assert.deepEqual(prompts(fam[2]), ["P09"]);
   assert.deepEqual(prompts(fam[3]), ["P11"]);
-  // A family with nobody entered yet just says how many: 1 man, 0 women.
+  // 0 men and 0 women asks again.
+  const zero = await call(db, ["1", "0", "0"], { from: "8455550002", id: "me4" });
+  assert.deepEqual(prompts(zero[3]).slice(-1), ["P08"]);
+  // A family with nobody entered yet: the same.
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
   db.prepare("INSERT INTO phones (number, household_id, notify) VALUES ('+18455550003', 'hh2', 'both')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('store', NULL, '21', 'Store', '3 Other St', 46, -74)").run();
-  const none = await call(db, ["1", "1", "1", "0", "21", "20", "2", "0100", "1"], { from: "8455550003", id: "me3" });
-  assert.deepEqual(prompts(none[2]), ["P08"]);
+  const none = await call(db, ["1", "1", "0", "21", "20", "2", "0100", "1"], { from: "8455550003", id: "me3" });
+  assert.deepEqual(prompts(none[1]), ["P08"]);
   const rows = db.prepare("SELECT booked_by_phone, household_id, passenger_id, men, women FROM bookings ORDER BY pickup_minute").all().map((r) => ({ ...r }));
   assert.deepEqual(rows, [
     { booked_by_phone: "+18455550001", household_id: "hh1", passenger_id: "ps1", men: 1, women: 0 },
-    { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: "ps2", men: 0, women: 1 },
+    { booked_by_phone: "+18455550002", household_id: "hh1", passenger_id: null, men: 0, women: 1 },
     { booked_by_phone: "+18455550003", household_id: "hh2", passenger_id: null, men: 1, women: 0 },
   ]);
 });
