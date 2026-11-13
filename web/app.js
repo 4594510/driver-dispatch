@@ -214,7 +214,7 @@ const ago = (iso) => {
 };
 const DRIVER_STATUS = { online: "Online", paused: "Paused", offline: "Offline" };
 function driverLine(d) {
-  const where = d.last_lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${d.last_lat},${d.last_lng}" target="_blank" rel="noopener">seen ${ago(d.last_seen_at)}</a>` : " · no location yet";
+  const where = d.last_lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${d.last_lat},${d.last_lng}" target="_blank" rel="noopener">seen ${ago(d.last_seen_at)}</a>` : d.status === "online" ? " · no location yet" : " · location not shared (not at work)";
   const until = d.status === "paused" && d.paused_until ? ` until ${new Date(d.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
   return `<b>${esc(d.name)}</b>: ${DRIVER_STATUS[d.status] || esc(d.status)}${until}${where}`;
 }

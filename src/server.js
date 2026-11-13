@@ -25,7 +25,7 @@ import { localParts } from "./rules.js";
 import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
-import { driverRouter, setPin, driverNow } from "./driver.js";
+import { driverRouter, setPin, driverNow, setDriverStatus } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
 import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
 import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
@@ -370,8 +370,10 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   admin.get("/drivers", (_req, res) => {
     const rows = db.prepare("SELECT id FROM drivers ORDER BY name").all();
     res.json(rows.map(({ id }) => {
-      const { pin_hash: pin, ...d } = driverNow(db, id, clock());
-      return { ...d, has_pin: !!pin };
+      const { pin_hash: pin, online_since: _since, off_at: _off, ...d } = driverNow(db, id, clock());
+      // No position is shown while the driver is not at work.
+      const where = d.status === "online" ? {} : { last_lat: null, last_lng: null, last_seen_at: null };
+      return { ...d, ...where, has_pin: !!pin };
     }));
   });
   admin.post("/drivers/:id/pin", (req, res) => {
@@ -380,7 +382,7 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   admin.post("/drivers/:id/status", (req, res) => {
     if (!["online", "offline"].includes(req.body.status)) return bad(res, "Choose online or offline.");
-    db.prepare("UPDATE drivers SET status = ?, paused_until = NULL WHERE id = ?").run(req.body.status, req.params.id);
+    setDriverStatus(db, req.params.id, req.body.status, null, clock());
     audit(db, req.actor, `driver_${req.body.status}`, null, { driverId: req.params.id });
     res.json({ ok: true });
   });

@@ -33,8 +33,9 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
 
-// While the driver is online or paused: GPS every few seconds, sent to /api/driver/location in batches (kept while
-// there's no signal), and a check for new ride requests every 30 seconds, so the phone rings even with the screen off.
+// While the driver is online or paused: a check every 30 seconds for new ride requests (so the phone rings even with
+// the screen off) and for his status. GPS only while he is online (at work): every few seconds, sent to
+// /api/driver/location in batches (kept while there's no signal). On a break GPS is off; after Stop work the service ends.
 public class TrackingService extends Service implements LocationListener {
     private static final String CH_TRACK = "tracking";
     private static final String CH_REQUEST = "requests";
@@ -51,6 +52,7 @@ public class TrackingService extends Service implements LocationListener {
     private JSONArray points = new JSONArray();
     private final Set<String> seen = new HashSet<>();
     private boolean firstCheck = true;
+    private boolean gps = false;
 
     static void start(Context c, String base, String token) {
         Intent i = new Intent(c, TrackingService.class).putExtra("base", base).putExtra("token", token);
@@ -87,7 +89,7 @@ public class TrackingService extends Service implements LocationListener {
         }
         Notification n = new Notification.Builder(this, CH_TRACK)
             .setContentTitle("Driver app is on")
-            .setContentText("Sharing your location with the office")
+            .setContentText("Ready for rides")
             .setSmallIcon(R.drawable.ic_notify)
             .setOngoing(true)
             .setContentIntent(openApp(this))
@@ -98,21 +100,40 @@ public class TrackingService extends Service implements LocationListener {
             stopSelf();
             return START_NOT_STICKY;
         }
-        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-        try {
-            lm.removeUpdates(this);
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, GPS_MS, 10f, this, thread.getLooper());
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, GPS_MS * 6, 50f, this, thread.getLooper());
-            }
-        } catch (SecurityException e) {
-            stopSelf();
-            return START_NOT_STICKY;
-        }
+        // GPS is turned on by check() once the server says he is online.
+        ((LocationManager) getSystemService(LOCATION_SERVICE)).removeUpdates(this);
+        gps = false;
         handler.removeCallbacksAndMessages(null);
         handler.postDelayed(this::send, SEND_MS);
         handler.post(this::check);
         return START_STICKY;
+    }
+
+    // GPS on only while the driver is online; off on a break.
+    private void setGps(boolean on) {
+        if (on == gps) return;
+        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        lm.removeUpdates(this);
+        gps = false;
+        if (on) {
+            try {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, GPS_MS, 10f, this, thread.getLooper());
+                if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, GPS_MS * 6, 50f, this, thread.getLooper());
+                }
+                gps = true;
+            } catch (SecurityException e) {
+                // no location permission: nothing is shared
+            }
+        }
+        Notification n = new Notification.Builder(this, CH_TRACK)
+            .setContentTitle("Driver app is on")
+            .setContentText(gps ? "Sharing your location with the office" : "On a break: location not shared")
+            .setSmallIcon(R.drawable.ic_notify)
+            .setOngoing(true)
+            .setContentIntent(openApp(this))
+            .build();
+        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(ID_TRACK, n);
     }
 
     @Override
@@ -134,6 +155,7 @@ public class TrackingService extends Service implements LocationListener {
     // --- GPS ---
     @Override
     public void onLocationChanged(Location loc) {
+        if (!gps) return;
         try {
             JSONObject p = new JSONObject();
             p.put("lat", loc.getLatitude());
@@ -197,9 +219,11 @@ public class TrackingService extends Service implements LocationListener {
                 firstCheck = false;
                 if (fresh.length() > 0 && "online".equals(driverStatus)) notifyRequest(this, "New ride request", fresh.toString());
                 if ("offline".equals(driverStatus)) {
+                    setGps(false);
                     stopSelf();
                     return;
                 }
+                setGps("online".equals(driverStatus));
             } else if (status == 401) {
                 stopSelf();
                 return;

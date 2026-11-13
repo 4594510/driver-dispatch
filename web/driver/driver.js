@@ -190,9 +190,11 @@ let watch = null;
 let tracking = null; // what the Android app was last told
 let points = store.get("driver.points", []);
 function track() {
-  const on = today?.driver?.status !== "offline";
+  const status = today?.driver?.status;
   if (native) {
-    // The app's own service sends GPS and rings for new requests, also with the screen off.
+    // The app's own service rings for new requests, also with the screen off, and sends GPS only while online
+    // (on a break it keeps checking, so it knows when the break is over, but shares no location).
+    const on = status && status !== "offline";
     const want = on ? `on:${token}` : "off";
     if (want === tracking) return;
     tracking = want;
@@ -200,6 +202,8 @@ function track() {
     else native.stopTracking?.();
     return;
   }
+  // Without the Android app: GPS only while online (Start work), never on a break or after Stop work.
+  const on = status === "online";
   if (on && watch == null && navigator.geolocation) {
     watch = navigator.geolocation.watchPosition((p) => {
       points.push({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, speed: p.coords.speed, at: new Date(p.timestamp).toISOString() });

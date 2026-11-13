@@ -41,12 +41,32 @@ export function setPin(db, driverId, pin, actor) {
   return { ok: true };
 }
 
+// The driver is tracked only while at work (online). Going online starts a new stretch; a break or Stop work ends it
+// and forgets the last position, so the office never sees where he is while he is off.
+export function setDriverStatus(db, id, status, until = null, now = new Date()) {
+  const at = now.toISOString();
+  if (status === "online") {
+    return db.prepare(`UPDATE drivers SET status = 'online', paused_until = NULL,
+      online_since = CASE WHEN status = 'online' AND online_since IS NOT NULL THEN online_since ELSE ? END, off_at = NULL WHERE id = ?`).run(at, id);
+  }
+  return db.prepare(`UPDATE drivers SET status = ?, paused_until = ?, last_lat = NULL, last_lng = NULL, last_seen_at = NULL,
+    off_at = CASE WHEN status = 'online' THEN ? ELSE off_at END WHERE id = ?`).run(status, until, at, id);
+}
+
+// Is a GPS point from a time the driver was at work? (Points sent late, after a stretch without signal, still count
+// when they were taken while online.)
+export function atWork(d, at) {
+  const t = at.toISOString();
+  if (d.status === "online") return !d.online_since || t >= d.online_since;
+  return !!(d.online_since && d.off_at && t >= d.online_since && t <= d.off_at);
+}
+
 // Paused drivers come back online by themselves when the pause runs out.
 export function driverNow(db, id, now = new Date()) {
   const d = db.prepare("SELECT * FROM drivers WHERE id = ?").get(id);
   if (d?.status === "paused" && d.paused_until && d.paused_until <= now.toISOString()) {
-    db.prepare("UPDATE drivers SET status = 'online', paused_until = NULL WHERE id = ?").run(id);
-    return { ...d, status: "online", paused_until: null };
+    setDriverStatus(db, id, "online", null, now);
+    return db.prepare("SELECT * FROM drivers WHERE id = ?").get(id);
   }
   return d;
 }
@@ -125,7 +145,7 @@ export function driverRouter(db, ctxFor) {
     if (!STATUSES.includes(status)) return { ok: false, errors: ["bad_status"] };
     const minutes = Number(req.body?.minutes) || 0;
     const until = status === "paused" && minutes > 0 ? new Date(c.now.getTime() + Math.min(minutes, 480) * 60000).toISOString() : null;
-    db.prepare("UPDATE drivers SET status = ?, paused_until = ? WHERE id = ?").run(status, until, req.driverId);
+    setDriverStatus(db, req.driverId, status, until, c.now);
     audit(db, req.actor, `driver_${status}`, null, until ? { until } : {});
     return { ok: true, driver: publicDriver(driverNow(db, req.driverId, c.now)) };
   }));
@@ -139,12 +159,18 @@ export function driverRouter(db, ctxFor) {
       .filter((p) => Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 && Number.isFinite(p.lat) && Number.isFinite(p.lng) && !Number.isNaN(p.at.getTime()))
       .slice(0, 2000);
     if (!pts.length) return res.status(400).json({ ok: false, errors: ["no_points"] });
+    // Only points from while he was at work are kept; the rest are dropped (answered ok, so the app lets go of them).
+    const d = driverNow(db, req.driverId, c.now);
+    const when = (p) => (p.at > c.now ? c.now : p.at); // a phone clock ahead of ours counts as now
+    const kept = pts.filter((p) => atWork(d, when(p)));
     const add = db.prepare("INSERT INTO driver_locations (driver_id, at, lat, lng, accuracy, speed) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const p of pts) add.run(req.driverId, (p.at > c.now ? c.now : p.at).toISOString(), p.lat, p.lng, p.accuracy, p.speed);
-    const last = pts.reduce((a, b) => (b.at > a.at ? b : a));
-    const d = db.prepare("SELECT last_seen_at FROM drivers WHERE id = ?").get(req.driverId);
-    if (!d.last_seen_at || last.at.toISOString() >= d.last_seen_at) {
-      db.prepare("UPDATE drivers SET last_lat = ?, last_lng = ?, last_seen_at = ? WHERE id = ?").run(last.lat, last.lng, (last.at > c.now ? c.now : last.at).toISOString(), req.driverId);
+    for (const p of kept) add.run(req.driverId, when(p).toISOString(), p.lat, p.lng, p.accuracy, p.speed);
+    if (d.status !== "online") return res.json({ ok: true, saved: kept.length, dropped: pts.length - kept.length, refreshed: false });
+    if (kept.length) {
+      const last = kept.reduce((a, b) => (b.at > a.at ? b : a));
+      if (!d.last_seen_at || when(last).toISOString() >= d.last_seen_at) {
+        db.prepare("UPDATE drivers SET last_lat = ?, last_lng = ?, last_seen_at = ? WHERE id = ?").run(last.lat, last.lng, when(last).toISOString(), req.driverId);
+      }
     }
     // Arrival times from where the driver really is, now and then.
     const day = localParts(c.now, c.settings.timeZone).day;
@@ -155,7 +181,7 @@ export function driverRouter(db, ctxFor) {
       tellLate(c, day);
       refreshed = true;
     }
-    res.json({ ok: true, saved: pts.length, refreshed });
+    res.json({ ok: true, saved: kept.length, dropped: pts.length - kept.length, refreshed });
   });
 
   r.get("/requests/:id/preview", async (req, res) => {

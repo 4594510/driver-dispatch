@@ -154,6 +154,7 @@ test("reports: waiting, on time, ride length, and driving from GPS", async () =>
   await withDay(async ({ call, setToken, at }) => {
     await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
     setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
     const a = (await call("/api/admin/bookings", "POST", ride())).body.bookings[0].id;
     await call(`/api/driver/bookings/${a}/accept`, "POST", {});
     at("2026-11-11T17:20:00Z"); // 12:20, five minutes past the window
@@ -171,6 +172,55 @@ test("reports: waiting, on time, ride length, and driving from GPS", async () =>
     assert.equal(r.averageRideMinutes, 15);
     assert.equal(r.drivingMinutes, 2);
     assert.ok(r.miles > 0.9 && r.miles < 1.1, `miles ${r.miles}`);
+  });
+});
+
+test("the driver is tracked only while at work: nothing kept or shown on a break or after Stop work", async () => {
+  await withDay(async ({ call, db, setToken, at }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    const pt = (lat, iso) => ({ lat, lng: -74, at: iso });
+    const send = async (...points) => (await call("/api/driver/location", "POST", { points })).body;
+    const count = () => db.prepare("SELECT count(*) AS n FROM driver_locations").get().n;
+    const shown = async () => (await call("/api/admin/drivers")).body[0];
+
+    // Off (never started): dropped, nothing shown.
+    assert.deepEqual(await send(pt(41, "2026-11-11T14:59:00Z")), { ok: true, saved: 0, dropped: 1, refreshed: false });
+    assert.equal(count(), 0);
+    assert.equal((await shown()).last_lat, null);
+
+    // Start work: kept and shown.
+    await call("/api/driver/status", "POST", { status: "online" });
+    at("2026-11-11T15:10:00Z");
+    assert.equal((await send(pt(41, "2026-11-11T14:59:00Z"), pt(41.5, "2026-11-11T15:05:00Z"))).saved, 1, "only the point from after Start work");
+    assert.equal((await shown()).last_lat, 41.5);
+
+    // A break: the last position is forgotten; points taken on the break are dropped, but ones from before it that
+    // arrive late (no signal) are kept for the reports, still not shown.
+    at("2026-11-11T15:20:00Z");
+    await call("/api/driver/status", "POST", { status: "paused", minutes: 30 });
+    assert.equal((await shown()).last_lat, null);
+    assert.equal(db.prepare("SELECT last_lat FROM drivers").get().last_lat, null);
+    at("2026-11-11T15:30:00Z");
+    const late = await send(pt(41.6, "2026-11-11T15:15:00Z"), pt(41.7, "2026-11-11T15:25:00Z"));
+    assert.equal(late.saved, 1);
+    assert.equal(late.dropped, 1);
+    assert.equal((await shown()).last_lat, null);
+
+    // Back from the break by itself: tracked again, from then on only.
+    at("2026-11-11T15:51:00Z");
+    assert.equal((await send(pt(41.8, "2026-11-11T15:30:00Z"), pt(41.9, "2026-11-11T15:51:00Z"))).saved, 1);
+    assert.equal((await shown()).last_lat, 41.9);
+
+    // Stop work (or the office sets him offline): forgotten, nothing more kept.
+    at("2026-11-11T16:00:00Z");
+    await call("/api/admin/drivers/drv1/status", "POST", { status: "offline" });
+    assert.equal((await shown()).last_lat, null);
+    at("2026-11-11T16:05:00Z");
+    assert.equal((await send(pt(42, "2026-11-11T16:01:00Z"))).saved, 0);
+    assert.equal(count(), 3);
+    const track = (await call("/api/admin/drivers/drv1/track?day=2026-11-11")).body;
+    assert.deepEqual(track.map((p) => p.lat), [41.5, 41.6, 41.9]);
   });
 });
 
