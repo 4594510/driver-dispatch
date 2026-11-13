@@ -74,7 +74,8 @@ function normalize(s) {
   return null;
 }
 const clean = (res) => ({ ...res, play: (res.play || []).flat(Infinity).filter(Boolean), hangup: !!res.hangup });
-const ask = (step, play, maxKeys = STEP_KEYS[step] || 1) => ({ play, gather: { step, max_keys: maxKeys, timeout_s: 6 } });
+const ask = (step, play, maxKeys = STEP_KEYS[step] || 1) =>
+  ({ play, gather: { step, max_keys: maxKeys, timeout_s: 6, ...(STEP_KEYS[step] ? { min_keys: 0 } : {}) } });
 // Let the caller speak (a one-time address): Fonory turns it into text and comes back to `step` with it.
 const listen = (step, play) => ({ play, listen: { step, max_s: 20 } });
 const end = (play) => ({ play: [play, P("P41")], hangup: true });
