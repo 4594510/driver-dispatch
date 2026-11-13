@@ -174,3 +174,16 @@ test("two rides accepted at the same moment both end up on the route, or the sec
   assert.deepEqual(both.map((o) => o.ok), [true, true]);
   assert.equal(dayRoute(db, day).stops.length, 6);
 });
+
+test("a package rides along on the route with no seats", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  const a = (await bookRide(db, travel, ask({ men: 1, women: 6 }), now, settings)).bookings[0];
+  assert.ok((await acceptRide(db, travel, a.id, "drv1", settings, now)).ok);
+  const b = await bookRide(db, travel, ask({ package: true, pickup: { address: "3 Other St" }, pickupMinute: 12 * 60 + 5 }), now, settings);
+  assert.ok(b.ok, JSON.stringify(b));
+  assert.ok((await acceptRide(db, travel, b.bookings[0].id, "drv1", settings, now)).ok);
+  const route = dayRoute(db, day);
+  assert.equal(route.stops.length, 4);
+  assert.ok(route.seatsByStop.every((s) => s.rows.reduce((n, r) => n + r.men + r.women, 0) <= 7));
+});

@@ -66,7 +66,7 @@ const whenText = (p) => {
   if (p.ends_at && p.ends_at < new Date().toLocaleString("sv-SE", { timeZone: "America/New_York" }).slice(0, 16).replace(" ", "T")) return `Ended ${t(p.ends_at)}`;
   return `${p.starts_at ? `From ${t(p.starts_at)}` : "Now"}${p.ends_at ? ` until ${t(p.ends_at)}` : " on"}`;
 };
-const riders = (b) => [b.men && `${b.men} ${b.men === 1 ? "man" : "men"}`, b.women && `${b.women} ${b.women === 1 ? "woman" : "women"}`].filter(Boolean).join(", ") + (b.together ? " (may sit together)" : "");
+const riders = (b) => !b.men && !b.women ? "Package only (no riders)" : [b.men && `${b.men} ${b.men === 1 ? "man" : "men"}`, b.women && `${b.women} ${b.women === 1 ? "woman" : "women"}`].filter(Boolean).join(", ") + (b.together ? " (may sit together)" : "");
 
 // ---------- login ----------
 function showLogin() { $("#app").hidden = true; $("#login").hidden = false; }
@@ -232,10 +232,11 @@ async function today() {
         <div class="row">
           <label>Last 4 digits <input name="last4" inputmode="numeric" maxlength="4" size="4" placeholder="1234" title="Type the last 4 digits of the caller's number to pick the phone"></label>
           <label>Caller's phone <select name="phone" required>${phones.map((p) => `<option value="${esc(p.number)}">${esc(p.family)}${p.person ? ` (${esc(p.person)})` : ""}: ${esc(phoneText(p.number))}</option>`).join("")}</select></label>
-          <label>Rider's name (empty = the people below) <input name="riderName"></label>
+          <label><span class="not-package">Rider's name (empty = the people below)</span><span class="package-only" hidden>What or for whom (optional)</span> <input name="riderName"></label>
+          <label><input name="package" type="checkbox"> Just a package (no riders)</label>
         </div>
-        <div class="row people-pick" id="book-people"></div>
-        <div class="row">
+        <div class="row people-pick not-package" id="book-people"></div>
+        <div class="row not-package">
           <label><span class="people-only">Other </span>men <input name="men" type="number" min="0" max="7" value="0"></label>
           <label><span class="people-only">Other </span>women <input name="women" type="number" min="0" max="6" value="0"></label>
           <label><input name="together" type="checkbox"> Men and women may sit together</label>
@@ -286,6 +287,11 @@ async function today() {
     form.phone.dispatchEvent(new Event("change"));
     if (hits.length > 1) toast(`${hits.length} phones end in ${d}; picked the first. Check the list.`);
   });
+  // A package only: no riders to pick or count.
+  form.package.addEventListener("change", () => {
+    for (const el of form.querySelectorAll(".not-package")) el.hidden = form.package.checked;
+    for (const el of form.querySelectorAll(".package-only")) el.hidden = !form.package.checked;
+  });
   form.from.addEventListener("change", () => showAddress("from"));
   form.to.addEventListener("change", () => showAddress("to"));
   fillPlaces();
@@ -308,7 +314,7 @@ async function today() {
       phone: f.get("phone"), riderName: f.get("riderName"), riders: picked.map((p) => p.id),
       men: Number(f.get("men")) + picked.filter((p) => p.gender === "m").length,
       women: Number(f.get("women")) + picked.filter((p) => p.gender === "f").length,
-      together: !!f.get("together"),
+      together: !!f.get("together"), package: !!f.get("package"),
       pickup: f.get("from") ? { placeId: f.get("from") } : { address: f.get("fromAddress") },
       dropoff: f.get("to") ? { placeId: f.get("to") } : { address: f.get("toAddress") },
       pickupMinute: f.get("time") ? timeToMinute(f.get("time")) : null, window: Number(f.get("window")),
@@ -316,7 +322,7 @@ async function today() {
     };
     try {
       const r = await api("/api/admin/bookings", { method: "POST", body });
-      toast(`Ride requested (pickup about ${minuteText(r.etas[r.bookings[0].id])}); it waits for the driver`);
+      toast(`${body.package ? "Package" : "Ride"} requested (pickup about ${minuteText(r.etas[r.bookings[0].id])}); it waits for the driver`);
       reload();
     } catch (err) {
       if (err.message === "signed out") return;

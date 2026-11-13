@@ -43,7 +43,7 @@ const minuteText = (m) => {
   const h24 = Math.floor(m / 60);
   return `${((h24 + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`;
 };
-const people = (x) => [x.men ? `${x.men} ${x.men === 1 ? "man" : "men"}` : "", x.women ? `${x.women} ${x.women === 1 ? "woman" : "women"}` : ""].filter(Boolean).join(", ");
+const people = (x) => !x.men && !x.women ? "📦 Package only, no riders" : [x.men ? `${x.men} ${x.men === 1 ? "man" : "men"}` : "", x.women ? `${x.women} ${x.women === 1 ? "woman" : "women"}` : ""].filter(Boolean).join(", ");
 const ROWS = { front: "Front", row2: "Row 2", row3: "Row 3" };
 const seatText = (seats) => Object.entries(seats || {}).map(([r, s]) => `${ROWS[r] || r}: ${people(s)}`).join(" · ");
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
