@@ -26,6 +26,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   P60-P64 and P68 unused.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
+- A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
+  women, takes no seats; the name field is a note, "Package: ..."); the driver app shows "Package only". Not on the phone yet.
 - A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late

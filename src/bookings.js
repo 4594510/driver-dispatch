@@ -49,7 +49,7 @@ export function seatCheck(db, day, candidates, settings = DEFAULT_SETTINGS, layo
 }
 
 // Check a ride request against the rules and build its rows (and its return trip, if asked), without saving. input:
-// { phone, passengerId?, riderName?, men, women, together, pickup: {placeId?|address}, dropoff: {...}, pickupMinute?,
+// { phone, passengerId?, riderName?, men, women, together, package? (a package only: no riders, riderName is a note), pickup: {placeId?|address}, dropoff: {...}, pickupMinute?,
 //   window, returnMinute? }
 // Returns { ok: true, rides: [...], phone } or { ok: false, errors: [...] }.
 export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETTINGS) {
@@ -59,9 +59,11 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
   const day = localParts(now, settings.timeZone).day;
   const check = checkRequest(now, { day, pickupMinute: input.pickupMinute ?? null, window: input.window, returnMinute: input.returnMinute }, settings);
   const errors = [...check.errors];
-  const men = Number(input.men) || 0;
-  const women = Number(input.women) || 0;
-  if (men + women === 0) errors.push("no_riders");
+  // A package only (input.package): no riders, so it takes no seats; the driver picks it up and drops it off.
+  const pkg = !!input.package;
+  const men = pkg ? 0 : Number(input.men) || 0;
+  const women = pkg ? 0 : Number(input.women) || 0;
+  if (!pkg && men + women === 0) errors.push("no_riders");
 
   const place = (p) => {
     if (!p) return null;
@@ -83,7 +85,9 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
 
   let riderName = input.riderName || "";
   let main = null;
-  if (input.passengerId) {
+  if (pkg) {
+    riderName = String(input.riderName || "").trim() ? `Package: ${String(input.riderName).trim()}` : "Package";
+  } else if (input.passengerId) {
     main = db.prepare("SELECT * FROM passengers WHERE id = ? AND active = 1").get(input.passengerId);
     if (!main) return { ok: false, errors: ["unknown_passenger"] };
     riderName = main.name;
@@ -92,7 +96,7 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
   // are everyone, so they must hold at least the named men and women.
   const allowed = new Map(peopleForFamily(db, phone.household_id).map((p) => [p.id, p]));
   const named = [];
-  if (Array.isArray(input.riders) && input.riders.length) {
+  if (!pkg && Array.isArray(input.riders) && input.riders.length) {
     for (const id of input.riders.map(String)) {
       const p = allowed.get(id) || (main?.id === id ? main : null);
       if (!p) return { ok: false, errors: ["unknown_passenger"] };
@@ -110,11 +114,11 @@ export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETT
     day,
     household_id: phone.household_id,
     booked_by_phone: phone.number,
-    passenger_id: input.passengerId || null,
+    passenger_id: pkg ? null : input.passengerId || null,
     rider_name: riderName,
     men,
     women,
-    together: input.together ? 1 : 0,
+    together: !pkg && input.together ? 1 : 0,
     riders: named.length ? JSON.stringify(named.map((p) => p.id)) : null,
     window_minutes: input.window,
   };

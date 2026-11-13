@@ -154,7 +154,8 @@ function overlaps(a, b) {
 // move. Returns { ok: true, plan: { [id]: { [rowId]: { men, women, people? } } } } or { ok: false, reason, at }.
 export function planSeats(bookings, layout = DEFAULT_LAYOUT) {
   for (const b of bookings) {
-    if (!(b.men >= 0 && b.women >= 0) || b.men + b.women === 0) return { ok: false, reason: "empty_booking", id: b.id };
+    // No men and no women is a package only (bookings.js): it takes no seats.
+    if (!(b.men >= 0 && b.women >= 0)) return { ok: false, reason: "empty_booking", id: b.id };
     if (!(b.pickup < b.dropoff)) return { ok: false, reason: "bad_stops", id: b.id };
     const people = b.people || [];
     if (people.filter((p) => p.gender === "m").length > b.men || people.filter((p) => p.gender === "f").length > b.women) {

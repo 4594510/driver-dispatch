@@ -59,3 +59,20 @@ test("status changes follow the ride's life: DONE only after acceptance", () => 
   assert.equal(changeStatus(db, a.id, "pickup", "driver").ok, true);
   assert.equal(changeStatus(db, a.id, "done", "driver").booking.status, "completed");
 });
+
+test("a package only: no riders, takes no seats, books even when the van is full", () => {
+  const db = setup();
+  // Without the package choice, no riders is still refused.
+  assert.deepEqual(requestRide(db, ask({ men: 0, women: 0 }), now).errors, ["no_riders"]);
+  const full = requestRide(db, ask({ men: 1, women: 6 }), now).bookings[0];
+  assert.ok(acceptBooking(db, full.id, "drv1").ok);
+  const r = requestRide(db, ask({ package: true, riderName: "for Bubby", men: 3, women: 2, together: true }), now);
+  assert.ok(r.ok, JSON.stringify(r));
+  const p = r.bookings[0];
+  assert.equal(p.men, 0);
+  assert.equal(p.women, 0);
+  assert.equal(p.together, 0);
+  assert.equal(p.rider_name, "Package: for Bubby");
+  assert.ok(acceptBooking(db, p.id, "drv1").ok);
+  assert.equal(requestRide(db, ask({ package: true, riderName: "" }), now).bookings[0].rider_name, "Package");
+});
