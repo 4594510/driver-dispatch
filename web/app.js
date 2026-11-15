@@ -555,7 +555,7 @@ const PERSON_FIELDS = [
 // ---------- shared places ----------
 async function places() {
   const all = await api("/api/admin/places");
-  main.innerHTML = `<div class="card"><h2>Saved places</h2><p class="quiet">Every saved address, from the dashboard or the phone. Any caller can press its code (100 on the phone = say a new address). A family's home is also under Families.</p>
+  main.innerHTML = `<div class="card"><h2>Saved places</h2><p class="quiet">Every saved address, from the dashboard or the phone. Any caller can press its code (# on the phone = say a new address). A family's home is also under Families.</p>
     <table><tbody>${all.map(placeRow).join("") || '<tr><td class="quiet">None yet.</td></tr>'}</tbody></table>
     <form class="row" id="add-pl"><label>Code on the phone <input name="code" pattern="\\d{1,6}" maxlength="6" placeholder="house number" title="1 to 6 digits. Empty = the house number. Two places may share a code: callers hear both names and choose."></label>
       <label>Name <input name="name" required></label><label>Name in Yiddish (said on the phone) <input name="spoken" dir="rtl"></label>

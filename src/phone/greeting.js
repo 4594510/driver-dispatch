@@ -12,8 +12,11 @@ function localHourAndWeekday(when, timeZone) {
   return { hour: Number(parts.find((p) => p.type === "hour").value), weekday: parts.find((p) => p.type === "weekday").value };
 }
 
-// Erev Yom Tov: erev Rosh Hashana, Yom Kippur, Sukkos, Shmini Atzeres, Pesach, the last days of Pesach, Shavuos.
-const EREV_YOM_TOV = { Elul: [29], Tishri: [9, 14, 21], Nisan: [14, 20], Sivan: [5] };
+// Erev Yom Tov: erev Rosh Hashana, Yom Kippur, Sukkos, Pesach, Shavuos. Erev Shmini Atzeres (Hoshana Rabba) and erev
+// the last days of Pesach fall in Chol Hamoed and get "a gutn moed" (Shloime, 2026-11-15).
+const EREV_YOM_TOV = { Elul: [29], Tishri: [9, 14], Nisan: [14], Sivan: [5] };
+// Chol Hamoed (outside Eretz Yisroel): Sukkos 17-21 Tishri (21 = Hoshana Rabba), Pesach 17-20 Nisan.
+const CHOL_HAMOED = { Tishri: [17, 21], Nisan: [17, 20] };
 
 // The prompt code to greet with at `now` (a Date) in `timeZone` (Shloime, 2026-11-13).
 export function greetingPrompt(now, timeZone = "America/New_York") {
@@ -24,8 +27,9 @@ export function greetingPrompt(now, timeZone = "America/New_York") {
     if (d.month === "Kislev" && d.day === 25) return "P78"; // א לעכטיגן חנוכה
   }
   if ((month === "Adar" || month === "Adar II") && (day === 14 || day === 15)) return "P79"; // א פרייליכן פורים
+  const moed = CHOL_HAMOED[month];
+  if (moed && day >= moed[0] && day <= moed[1]) return "P77"; // א גוטן מועד
   if (EREV_YOM_TOV[month]?.includes(day)) return "P83"; // א גוטן ערב יום טוב
-  if ((month === "Tishri" && day >= 17 && day <= 20) || (month === "Nisan" && day >= 17 && day <= 19)) return "P77"; // א גוטן מועד
   const { hour, weekday } = localHourAndWeekday(now, timeZone);
   if (weekday === "Fri") return "P82"; // א גוטן ערב שבת
   if (day === 30 || (day === 1 && month !== "Tishri")) return "P76"; // א גוטן חודש
@@ -35,10 +39,14 @@ export function greetingPrompt(now, timeZone = "America/New_York") {
   return "P74"; // א גוטן אוונט
 }
 
-// The goodbye: in Elul "a kesiva vachasima tova", from Rosh Hashana to Yom Kippur "a gmar chasima tova", else P41.
+// The goodbye (Shloime, 2026-11-15): from 15 Av until Rosh Hashana "a kesiva vachasima tova", from Rosh Hashana through
+// Yom Kippur "a gmar chasima tova", after Yom Kippur until before Hoshana Rabba "gmar chosem chaim", on Hoshana Rabba
+// "a gut kvitel", else P41.
 export function farewellPrompt(now, timeZone = "America/New_York") {
   const { day, month } = jewishDate(now, timeZone);
-  if (month === "Elul") return "P80";
-  if (month === "Tishri" && day <= 10) return "P81";
+  if ((month === "Av" && day >= 15) || month === "Elul") return "P80"; // יישר כח, א כתיבה וחתימה טובה
+  if (month === "Tishri" && day <= 10) return "P81"; // יישר כח, א גמר חתימה טובה
+  if (month === "Tishri" && day <= 20) return "P84"; // יישר כח, גמר חותם חיים
+  if (month === "Tishri" && day === 21) return "P85"; // יישר כח, א גוט קוויטל
   return "P41";
 }

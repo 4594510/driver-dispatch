@@ -1,7 +1,7 @@
 // Lists of shared places Shloime gave, added once to the live database at startup (each list by its key, so a place
 // an admin removes later doesn't come back). A code another place also has is shared: callers choose by name.
 import { audit } from "./db.js";
-import { savePlace } from "./places.js";
+import { savePlace, houseNumber } from "./places.js";
 import { normalCode } from "./rules.js";
 
 // 2026-11-11: "the address is the code". Addresses as Google Maps found them.
@@ -48,6 +48,28 @@ export function addPlaceLists(db, lists = PLACE_LISTS, log = console.log) {
   }
   undoCodeMoves(db, log);
   fixCodes(db, CODE_FIXES, log);
+  unpadCodes(db, log);
+}
+
+// 2026-11-15 (Shloime): codes have no leading zero ("01" is 1), and a place whose code was moved off its house number
+// only because 100 was kept back (100 College Rd got "01") gets its house number back. Once.
+export function unpadCodes(db, log = console.log) {
+  const flag = "seed:unpad-codes-2026-11-15";
+  if (db.prepare("SELECT 1 FROM settings WHERE key = ?").get(flag)) return;
+  let n = 0;
+  for (const p of db.prepare("SELECT * FROM places").all()) {
+    let code = normalCode(p.code);
+    if (houseNumber(p.address) === "100" && code !== "100" && p.active) {
+      const clash = db.prepare("SELECT 1 FROM places WHERE active = 1 AND code = '100' AND household_id IS ? AND household_id IS NOT NULL").get(p.household_id);
+      if (!clash) code = "100";
+    }
+    if (code === p.code) continue;
+    db.prepare("UPDATE places SET code = ? WHERE id = ?").run(code, p.id);
+    audit(db, "system:list", "place_code_changed", null, { id: p.id, from: p.code, to: code });
+    n++;
+  }
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(flag, JSON.stringify({ at: new Date().toISOString(), changed: n }));
+  if (n) log(`codes: ${n} without a leading zero or back on their house number`);
 }
 
 // Codes Shloime corrected (2026-11-12): Walmart and Dr Lebowitz were saved as 25 and 40 before codes could have 3

@@ -84,5 +84,6 @@ export function canChangePickup(nowMinute, pickupMinute, settings = DEFAULT_SETT
   return pickupMinute - nowMinute > settings.changeCutoffMinutes;
 }
 
-// A place's code as saved and as pressed on the phone: 1 to 6 digits, at least 2 shown ("1" = "01", "012" = "12").
-export const normalCode = (keys) => String(Number(keys)).padStart(2, "0");
+// A place's code as saved and as pressed on the phone: 1 to 6 digits, no leading zeros ("01" = "1", "012" = "12").
+// Single digits are codes of their own (Shloime, 2026-11-15); 0 alone is home on the phone.
+export const normalCode = (keys) => String(Number(keys));

@@ -106,6 +106,7 @@ export function toActions(res, base, env = process.env) {
     if (p.prompt) actions.push({ action: "play", file: uploaded ? `${p.prompt}.wav` : `${base}/prompts/${p.prompt}.wav` });
     else if (p.audio) actions.push({ action: "play", file: p.audio });
     else if (p.say) actions.push({ action: "say", text: String(p.say).slice(0, 500), language: p.language || "yiddish" });
+    else if (p.pause) actions.push({ action: "pause", duration: Math.min(Number(p.pause) || 1000, 30000) });
   }
   // A spoken answer (a one-time address): their "collect" of the caller's voice, turned into text.
   if (res.listen && !res.hangup) {
@@ -125,7 +126,12 @@ export function toActions(res, base, env = process.env) {
   }
   if (res.gather && !res.hangup) {
     const g = res.gather;
+    // The question is the gather's own prompt: keys pressed while it plays belong to this gather. A key pressed during
+    // a separate play is handed to the next gather on its own, so "47" came as "4" and then "7" (calls 2026-11-13/15).
+    const last = actions[actions.length - 1];
+    const prompt = last && (last.action === "play" || last.action === "say") ? actions.pop() : undefined;
     actions.push({
+      ...(prompt ? { prompt } : {}),
       action: "gather",
       max_digits: g.max_keys || 1,
       timeout: (g.timeout_s || 6) * 1000,

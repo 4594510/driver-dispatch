@@ -8,8 +8,6 @@ import { newId, audit } from "./db.js";
 import { normalCode } from "./rules.js";
 
 export const MAX_CODE_DIGITS = 6;
-// Pressing 100 at a code means "I'll say a new address", so no place gets it.
-export const SAY_CODE = "100";
 
 // code → name of the active places a new place in this family (null = shared) must not repeat: that family's own.
 // Shared places don't block each other: callers choose between them.
@@ -17,9 +15,8 @@ export function usedCodes(db, householdId = null, exceptId = null) {
   const rows = householdId
     ? db.prepare("SELECT code, name FROM places WHERE active = 1 AND id IS NOT ? AND household_id = ?").all(exceptId, householdId)
     : [];
-  const used = new Map(rows.map((p) => [p.code, p.name]));
-  used.set(SAY_CODE, "the phone (100 = say a new address)");
-  return used;
+  // 100 is no longer kept back for "say an address" (# does that): 100 College Rd gets 100 (Shloime, 2026-11-15).
+  return new Map(rows.map((p) => [p.code, p.name]));
 }
 // Other places with this code, for a note ("also used by Walmart").
 export function sameCode(db, code, exceptId = null) {
@@ -41,7 +38,7 @@ export function freeCode(used, start = 1) {
 }
 
 // The code for a new place: the one asked for, else the house number, else the next free one. Refused only when the
-// same family already has it (or it is 100). Returns { code } or { error }.
+// same family already has it. Returns { code } or { error }.
 export function chooseCode(db, address, wanted = "", householdId = null) {
   const used = usedCodes(db, householdId);
   wanted = String(wanted ?? "").trim();
@@ -59,7 +56,7 @@ const pickFree = (used, address) => {
   return h && !used.has(h) ? h : freeCode(used);
 };
 
-// A changed code for an existing place: same rules as a new one (1 to 6 digits, not 100, not twice in one family).
+// A changed code for an existing place: same rules as a new one (1 to 6 digits, not twice in one family).
 export function checkCode(db, place, wanted) {
   wanted = String(wanted ?? "").trim();
   if (!new RegExp(`^\\d{1,${MAX_CODE_DIGITS}}$`).test(wanted)) return { error: `The code must be 1 to ${MAX_CODE_DIGITS} digits.` };
