@@ -202,11 +202,13 @@ test("the phone line speaks Teltech's format: key first, then { actions } for ea
     const r = await call("/fonory/step?key=hook-secret", "POST", first);
     assert.equal(r.status, 200);
     // A second of quiet, the greeting, then the menu as the gather's own prompt.
-    assert.deepEqual(r.body.actions, [
+    // (Today's hours come in between only outside the hours, so the middle depends on the clock.)
+    assert.deepEqual(r.body.actions.slice(0, 2), [
       { action: "pause", duration: 1000 },
       { action: "play", file: `https://dispatch.example/prompts/${greetingPrompt(new Date())}.wav` },
-      { prompt: { action: "play", file: "https://dispatch.example/prompts/P04.wav" }, action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" },
     ]);
+    assert.deepEqual(r.body.actions.at(-1),
+      { prompt: { action: "play", file: "https://dispatch.example/prompts/P04.wav" }, action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" });
     const unknown = await call("/fonory/step?key=hook-secret", "POST", { ...first, call_id: "c2", caller_id: "18455559999" });
     assert.deepEqual(unknown.body.actions, [{ action: "play", file: "https://dispatch.example/prompts/P02.wav" }, { action: "hangup" }]);
     const status = await call("/fonory/status?key=hook-secret", "POST", { call_id: "c1", status: "completed" });

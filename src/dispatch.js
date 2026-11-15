@@ -259,7 +259,14 @@ export async function bookRide(db, travel, input, now = new Date(), settings = D
     if (loose.after.ok) { plan = loose; seatConflict = true; }
   }
   if (!plan.after.ok) {
-    return { ok: false, errors: [plan.after.reason], suggestions: suggestTimes(db, day, prep.rides, ctx, settings, now) };
+    // Why, for the log: the rides already on the route, and where the driver starts from (his GPS spot or none).
+    const first = newRides[0];
+    const why = {
+      routed: routedRows(db, day).length,
+      start: ctx.start?.at ? `driver spot, ${Math.round(travel.minutes(ctx.start.at, first.from, ctx.start.minute).minutes)} min to the pickup` : "no driver spot",
+      window: [first.windowStart, first.windowEnd],
+    };
+    return { ok: false, errors: [plan.after.reason], why, suggestions: suggestTimes(db, day, prep.rides, ctx, settings, now) };
   }
   const saved = saveRides(db, prep.rides, actor || `phone:${prep.phone.number}`);
   const e = etas(plan.after.stops, plan.after.timing);
