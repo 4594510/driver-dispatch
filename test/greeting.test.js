@@ -29,3 +29,21 @@ test("the goodbye wishes a kesiva vachasima tova in Elul and a gmar chasima tova
   assert.equal(farewellPrompt(new Date("2027-10-05T14:00:00Z")), "P81", "4 Tishrei");
   assert.equal(farewellPrompt(new Date("2026-11-12T14:00:00Z")), "P41");
 });
+
+test("Chol Hamoed, also Hoshana Rabba and erev the last days of Pesach, greets with a gutn moed (Shloime, 2026-11-15)", () => {
+  assert.equal(at("2027-10-15T14:00:00Z"), "P83", "14 Tishri: erev Sukkos");
+  assert.equal(at("2027-10-21T14:00:00Z"), "P77", "20 Tishri: Chol Hamoed");
+  assert.equal(at("2027-10-22T14:00:00Z"), "P77", "21 Tishri, a Friday: Hoshana Rabba is Chol Hamoed, not erev Yom Tov or erev Shabbos");
+  assert.equal(at("2027-04-27T14:00:00Z"), "P77", "20 Nisan: erev the last days, still Chol Hamoed");
+});
+
+test("the goodbye: kesiva vachasima from 15 Av, gmar chasima to Yom Kippur, gmar chosem chaim, a gut kvitel on Hoshana Rabba", () => {
+  const bye = (iso) => farewellPrompt(new Date(iso));
+  assert.equal(bye("2027-08-17T14:00:00Z"), "P41", "14 Av");
+  assert.equal(bye("2027-08-18T14:00:00Z"), "P80", "15 Av");
+  assert.equal(bye("2027-10-11T14:00:00Z"), "P81", "10 Tishri: Yom Kippur");
+  assert.equal(bye("2027-10-12T14:00:00Z"), "P84", "11 Tishri: after Yom Kippur");
+  assert.equal(bye("2027-10-21T14:00:00Z"), "P84", "20 Tishri");
+  assert.equal(bye("2027-10-22T14:00:00Z"), "P85", "21 Tishri: Hoshana Rabba");
+  assert.equal(bye("2027-10-28T14:00:00Z"), "P41", "27 Tishri");
+});

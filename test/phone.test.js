@@ -26,7 +26,7 @@ function setup() {
   db.prepare("INSERT INTO passengers (id, household_id, name, gender, spoken) VALUES ('ps1', 'hh1', 'Moshe', 'm', 'משה')").run();
   db.prepare("INSERT INTO passengers (id, household_id, name, gender, spoken) VALUES ('ps2', 'hh1', 'Rivka', 'f', 'רבקה')").run();
   db.prepare("INSERT INTO phones (number, household_id, passenger_id, notify) VALUES ('+18455550001', 'hh1', 'ps1', 'both')").run();
-  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, lat, lng, spoken) VALUES ('home', 'hh1', '01', 'home', 'Home', '1 Example Ln', 41, -74, 'שטוב')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address, lat, lng, spoken) VALUES ('home', 'hh1', '1', 'home', 'Home', '1 Example Ln', 41, -74, 'שטוב')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng, spoken) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd', 51, -74, 'שול')").run();
   db.prepare("INSERT INTO drivers (id, name, phone, status) VALUES ('drv1', 'Driver', '+18455550100', 'online')").run();
   return db;
@@ -442,12 +442,11 @@ test("a new address said on the phone can be kept for everyone: its code is the 
   assert.equal(JSON.parse(s2.state).draft.from, p.id);
 });
 
-test("code 100 means saying a new address, and menu key 6 just adds one", async () => {
+test("menu key 6 just adds an address; its code is the house number, one digit or 100 too (Shloime, 2026-11-15)", async () => {
   const db = setup();
-  const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: "7 Ronald Dr, Monsey, NY 10952, USA", exact: true });
+  let found = "7 Ronald Dr, Monsey, NY 10952, USA";
+  const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: found, exact: true });
   const extra = { travel: { ...travel, lookup } };
-  const r = await call(db, ["1", "1", "100"], { extra });
-  assert.equal(r.at(-1).listen.step, "from_say");
   const m = await call(db, ["6"], { extra, id: "m" });
   assert.equal(m.at(-1).listen.step, "add_say");
   const step = (step, body) => phoneStep(ctx(db, extra), { call_id: "m", from: "8455550001", step, keys: "", ...body });
@@ -455,7 +454,16 @@ test("code 100 means saying a new address, and menu key 6 just adds one", async 
   const saved = await step("add_ok", { keys: "1" });
   assert.deepEqual(prompts(saved), ["P66", "P04"]);
   assert.equal(saved.gather.step, "menu");
-  assert.equal(db.prepare("SELECT name FROM places WHERE code = '07'").get().name, "7 Ronald Drive, Monsey");
+  assert.equal(db.prepare("SELECT name FROM places WHERE code = '7'").get().name, "7 Ronald Drive, Monsey");
+  // 100 is a code like any other now (# says an address): 100 College Rd gets 100, not 01.
+  found = "100 College Rd, Monsey, NY 10952, USA";
+  await call(db, ["6"], { extra, id: "m2" });
+  await phoneStep(ctx(db, extra), { call_id: "m2", from: "8455550001", step: "add_say", keys: "", transcript: "100 college road" });
+  await phoneStep(ctx(db, extra), { call_id: "m2", from: "8455550001", step: "add_ok", keys: "1" });
+  assert.equal(db.prepare("SELECT code FROM places WHERE address LIKE '100 College%'").get().code, "100");
+  // Pressing 7 at "from" finds it.
+  const r = await call(db, ["1", "1", "7"], { extra, id: "m3" });
+  assert.equal(r.at(-1).gather.step, "to");
 });
 
 test("from and to: a place code right away, 0 home, # alone (or no key) says an address, * the list", async () => {
@@ -497,7 +505,7 @@ test("a code two places share: the caller's own family's place wins, otherwise t
   const db = setup();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('wal', NULL, '25', 'Walmart', '1 Rt 59', 41, -74)").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('viz', NULL, '25', 'Viznitz', '25 Phyllis Ter', 41, -74)").run();
-  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('sat', NULL, '01', 'Satmer', '1 Monsey Blvd', 41, -74)").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('sat', NULL, '1', 'Satmer', '1 Monsey Blvd', 41, -74)").run();
   const st = (id) => JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = ?").get(id).state);
   const step = (id, step, keys) => phoneStep(ctx(db), { call_id: id, from: "8455550001", step, keys });
   // Walk to a code question, whatever the short booking asks first.
@@ -633,4 +641,20 @@ test("in Elul the goodbye wishes a kesiva vachasima tova (Shloime, 2026-11-13)",
   const r = await call(db, ["8", "", "8"], { extra: { now: new Date("2027-09-14T15:00:00Z") } });
   assert.deepEqual(prompts(r[3]), ["P80"]);
   assert.equal(r[3].hangup, true);
+});
+
+test("asking for a ride now outside today's hours says the hours and goes back to the menu, without hanging up", async () => {
+  const db = setup();
+  const late = { now: new Date("2026-11-12T03:40:00Z") }; // 10:40 PM New York
+  const r = await call(db, ["1", "1", "0", "20", "1"], { extra: late });
+  const last = r.at(-1);
+  assert.equal(last.hangup, false);
+  assert.equal(last.gather.step, "menu");
+  assert.deepEqual(prompts(last).filter((p) => p !== "P04").slice(0, 1), ["P48"]);
+});
+
+test("the call opens with a second of quiet before the greeting (Shloime, 2026-11-15)", async () => {
+  const db = setup();
+  const r = await phoneStep(ctx(db), { call_id: "q", from: "8455550001", step: "start", keys: "" });
+  assert.deepEqual(r.play[0], { pause: 1000 });
 });

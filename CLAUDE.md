@@ -26,7 +26,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   the menu) (Shloime, 2026-11-13). P69 unused. The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
   P60-P64 and P68 unused. The call opens with a greeting for the day, not the line name (src/phone/greeting.js,
   P72-P79, P82-P83: time of day, Rosh Chodesh, Chol Hamoed, Chanukah, Purim, erev Shabbos, erev Yom Tov, a gute
-  voch only on motzei Shabbos; P01 unused). The goodbye in Elul / until Yom Kippur is P80/P81 instead of P41 (Shloime, 2026-11-13).
+  voch only on motzei Shabbos; P01 unused). The goodbye instead of P41 (Shloime, 2026-11-15): 15 Av to Rosh Hashana P80
+  (כתיבה וחתימה טובה), to Yom Kippur P81 (גמר חתימה טובה), then to Hoshana Rabba P84 (גמר חותם חיים), Hoshana Rabba P85
+  (א גוט קוויטל). Chol Hamoed incl. Hoshana Rabba and erev the last days of Pesach greets P77 (א גוטן מועד). A second
+  of quiet before the greeting. Each question is the gather's own prompt (keys pressed during a separate play reach
+  Teltech's next gather one digit at a time). Asking for "now" outside the hours goes back to the menu.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
@@ -62,17 +66,18 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-  "#" alone at "from"/"to" (or code 100) is a one-time address: the caller says it (Teltech's voice collect with transcribe and barge-in: the question is the collect's own prompt; the only
-  spoken step; also code 100), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
+  "#" alone at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe and barge-in: the question is the collect's own prompt; the only
+  spoken step), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
   or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
-- src/places.js: saved addresses, usable by everyone (codes 1-6 digits, default the house number, 100 reserved). Two
+- src/places.js: saved addresses, usable by everyone (codes 1-6 digits, no leading zero, default the house number; 100
+  is not reserved any more, 2026-11-15). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P83 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P85 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P83 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P85 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

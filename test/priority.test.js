@@ -33,7 +33,7 @@ function setup() {
   db.prepare("INSERT INTO passengers (id, household_id, name, gender) VALUES ('mom', 'hhB', 'Mother', 'f'), ('kid', 'hhB', 'Son', 'm')").run();
   db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hhA')").run();
   db.prepare("INSERT INTO phones (number, household_id, passenger_id) VALUES ('+18455550002', 'hhB', 'mom'), ('+18455550003', 'hhB', NULL)").run();
-  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd'), ('homeA', 'hhA', '01', 'Home', '1 Example Ln'), ('homeB', 'hhB', '01', 'Home', '2 Second Ln')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd'), ('homeA', 'hhA', '1', 'Home', '1 Example Ln'), ('homeB', 'hhB', '1', 'Home', '2 Second Ln')").run();
   db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
   return db;
 }

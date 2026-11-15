@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P69, P68 not used) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P85, some unused) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -16,8 +16,8 @@ export const PROMPTS = {
   P08: "וויפיל מענער דארפן די רייד? דריקט די צאל.",
   P09: "וויפיל פרויען דארפן די רייד? דריקט די צאל.",
   P10: "מעגן די מענער און פרויען זיצן צוזאמען? יא, דריקט 1. ניין, דריקט 2.",
-  P11: "פון וואו גייט איר? דריקט דעם קאוד פונעם פלאץ. פון שטוב, דריקט 0. צו זאגן אן אדרעס, דריקט פאונד. צו הערן די ליסט, דריקט שטערן.",
-  P12: "וואו אהין ווילט איר גיין? דריקט דעם קאוד פונעם פלאץ. אהיים, דריקט 0. צו זאגן אן אדרעס, דריקט פאונד. צו הערן די ליסט, דריקט שטערן.",
+  P11: "לייג אריין די קאוד פונעם פלאץ פון איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
+  P12: "לייג אריין די קאוד פונעם פלאץ צו איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
   P13: "דריקט דעם קאוד פונעם פלאץ, און דערנאך פאונד.",
   P14: "צו הערן די ליסט פון פלעצער, דריקט 0. צו זאגן א נייע אדרעס, דריקט 1 0 0.",
   P15: "ווען? יעצט, דריקט 1. שפעטער היינט, דריקט 2.",
@@ -99,6 +99,9 @@ export const PROMPTS = {
   P81: "יישר כח, א גמר חתימה טובה.",
   P82: "א גוטן ערב שבת.",
   P83: "א גוטן ערב יום טוב.",
+  // Goodbye after Yom Kippur, and on Hoshana Rabba (Shloime, 2026-11-15).
+  P84: "יישר כח, גמר חותם חיים.",
+  P85: "יישר כח, א גוט קוויטל.",
 };
 
 // Small words between pieces, recorded once like the numbers.

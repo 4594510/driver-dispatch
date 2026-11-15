@@ -172,10 +172,11 @@ test("the phone line speaks Teltech's format: key first, then { actions } for ea
     assert.equal((await call("/fonory/step?key=wrong", "POST", first)).status, 403);
     const r = await call("/fonory/step?key=hook-secret", "POST", first);
     assert.equal(r.status, 200);
+    // A second of quiet, the greeting, then the menu as the gather's own prompt.
     assert.deepEqual(r.body.actions, [
+      { action: "pause", duration: 1000 },
       { action: "play", file: `https://dispatch.example/prompts/${greetingPrompt(new Date())}.wav` },
-      { action: "play", file: "https://dispatch.example/prompts/P04.wav" },
-      { action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" },
+      { prompt: { action: "play", file: "https://dispatch.example/prompts/P04.wav" }, action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" },
     ]);
     const unknown = await call("/fonory/step?key=hook-secret", "POST", { ...first, call_id: "c2", caller_id: "18455559999" });
     assert.deepEqual(unknown.body.actions, [{ action: "play", file: "https://dispatch.example/prompts/P02.wav" }, { action: "hangup" }]);
@@ -197,9 +198,11 @@ test("Teltech's requests and our answers translate both ways", () => {
   assert.deepEqual(toActions({ play: [{ prompt: "P19" }, { audio: `${base}/audio/clips/ab.wav` }, { say: "צוויי" }], gather: { step: "time", max_keys: 4, timeout_s: 6 } }, base, {}).actions, [
     { action: "play", file: `${base}/prompts/P19.wav` },
     { action: "play", file: `${base}/audio/clips/ab.wav` },
-    { action: "say", text: "צוויי", language: "yiddish" },
-    { action: "gather", max_digits: 4, timeout: 6000, tries: 1, terminator: "#", digit_timeout: 2500, action_url: `${base}/fonory/step?step=time` },
+    // The last piece is the gather's own prompt: keys pressed while it plays all go to this gather (a code like 47
+    // pressed during a separate play came as 4, then 7 to the next question).
+    { prompt: { action: "say", text: "צוויי", language: "yiddish" }, action: "gather", max_digits: 4, timeout: 6000, tries: 1, terminator: "#", digit_timeout: 2500, action_url: `${base}/fonory/step?step=time` },
   ]);
+  assert.deepEqual(toActions({ play: [{ pause: 1000 }], gather: { step: "menu" } }, base, {}).actions[0], { action: "pause", duration: 1000 }, "a pause is never a prompt");
   assert.deepEqual(toActions({ play: [{ prompt: "P41" }], hangup: true }, base, { FONORY_PROMPTS: "uploaded" }).actions,
     [{ action: "play", file: "P41.wav" }, { action: "hangup" }]);
 });
@@ -273,15 +276,15 @@ test("adding a place: the code is the house number, any 1 to 6 digits, shared co
     const other = await call("/api/admin/places", "POST", { householdId: hh2, name: "Home", address: "12 Main St" });
     assert.equal(other.body.code, "12", "another family may have the same code");
     assert.match(other.body.warning, /also used by Home/);
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, name: "Work", address: "12 Main St" })).body.code, "01", "the same family: the next free code");
-    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "03");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, name: "Work", address: "12 Main St" })).body.code, "1", "the same family: the next free code");
+    assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "3", name: "Work", address: "12 Main St" })).body.code, "3", "one digit is a code of its own");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "045", name: "Park", address: "12 Main St" })).body.code, "45");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234", name: "Shop", address: "12 Main St" })).body.code, "1234");
     assert.equal((await call("/api/admin/places", "POST", { householdId: hh, code: "1234567", name: "X", address: "12 Main St" })).status, 400, "at most 6 digits");
-    assert.match((await call("/api/admin/places", "POST", { code: "100", name: "X", address: "12 Main St" })).body.error, /100 = say a new address/);
+    assert.equal((await call("/api/admin/places", "POST", { code: "100", name: "X", address: "12 Main St" })).body.code, "100", "100 is a code like any other");
     const taken = await call("/api/admin/places", "POST", { householdId: hh, code: "12", name: "X", address: "12 Main St" });
     assert.equal(taken.status, 400, "one family can't have a code twice");
-    assert.match(taken.body.error, /already used by Home\. Code 02 is free/);
+    assert.match(taken.body.error, /already used by Home\. Code 2 is free/);
     const missing = await call("/api/admin/places", "POST", { householdId: hh, name: "X", address: "Nowhere Road 99" });
     assert.equal(missing.status, 400);
     assert.match(missing.body.error, /can't find/);
@@ -297,16 +300,16 @@ test("Shloime's lists of places are added once with their codes, sharing a code 
   const { audit } = await import("../src/db.js");
   const db = openDb(":memory:");
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'A', 'x')").run();
-  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '01', 'home', 'Home', '33 Elm St')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '1', 'home', 'Home', '33 Elm St')").run();
   db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('wal', NULL, '25', 'other', 'Walmart', '1 Rt 59')").run();
   // What the first list did on the live server: a family place moved out of 47.
   db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('bob', 'hh1', '04', 'other', 'Bobby', '9 Elm St')").run();
   audit(db, "system:list", "place_code_changed", null, { id: "bob", from: "47", to: "04" });
   addPlaceLists(db, PLACE_LISTS, () => {});
   const named = (n) => db.prepare("SELECT * FROM places WHERE name = ? AND active = 1").get(n);
-  assert.equal(named("Satmer").code, "01");
+  assert.equal(named("Satmer").code, "1");
   assert.equal(named("Satmer").household_id, null);
-  assert.equal(named("Home").code, "01", "the family's home keeps 1; that family's callers get it");
+  assert.equal(named("Home").code, "1", "the family's home keeps 1; that family's callers get it");
   assert.equal(named("Viznitz").code, "25", "shares 25 with Walmart");
   assert.equal(named("Weinberger").code, "40");
   assert.equal(named("Atrium").code, "401");
@@ -322,7 +325,7 @@ test("without a map key a place is saved unchecked", async () => {
     await signIn(call);
     const r = await call("/api/admin/places", "POST", { name: "Shul", address: "anything" });
     assert.equal(r.status, 200);
-    assert.equal(r.body.code, "01");
+    assert.equal(r.body.code, "1");
   });
 });
 
@@ -375,7 +378,6 @@ test("editing a place can change its code, with the same rules as adding", async
     const shop = (await call("/api/admin/places", "POST", { householdId: hh, code: "7", name: "Shop", address: "7 Elm St" })).body;
     await call("/api/admin/places", "POST", { code: "250", name: "Shul", address: "1 Main St" });
     assert.match((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "5" })).body.error, /already used by Home/);
-    assert.equal((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "100" })).status, 400);
     assert.equal((await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "12a" })).status, 400);
     const r = await call(`/api/admin/places/${shop.id}`, "PATCH", { code: "250", name: "Store" });
     assert.equal(r.status, 200);
@@ -383,8 +385,22 @@ test("editing a place can change its code, with the same rules as adding", async
     const p = db.prepare("SELECT * FROM places WHERE id = ?").get(shop.id);
     assert.equal(p.code, "250");
     assert.equal(p.name, "Store");
-    assert.equal((await call(`/api/admin/places/${home.id}`, "PATCH", { name: "Home" })).body.code, "05", "no code sent: kept");
+    assert.equal((await call(`/api/admin/places/${home.id}`, "PATCH", { name: "Home" })).body.code, "5", "no code sent: kept");
   });
+});
+
+test("codes lose their leading zero, and a place moved off house number 100 gets it back, once", async () => {
+  const { unpadCodes } = await import("../src/seed.js");
+  const db = openDb(":memory:");
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('a', NULL, '01', 'other', '100 College Road, Monsey', '100 College Rd, Monsey, NY 10952, USA')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('b', NULL, '07', 'other', 'Mnachem Yisral', '7 Ronald Dr')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('c', NULL, '250', 'other', 'Walmart', '250 Rt 59')").run();
+  unpadCodes(db, () => {});
+  const code = (id) => db.prepare("SELECT code FROM places WHERE id = ?").get(id).code;
+  assert.deepEqual([code("a"), code("b"), code("c")], ["100", "7", "250"]);
+  db.prepare("UPDATE places SET code = '01' WHERE id = 'a'").run();
+  unpadCodes(db, () => {});
+  assert.equal(code("a"), "01", "only once");
 });
 
 test("code fixes: Walmart to 250 and Dr Lebowitz to 400, once; a removed one comes back", async () => {

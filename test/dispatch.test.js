@@ -33,7 +33,7 @@ function setup() {
   const db = openDb(":memory:");
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
   db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
-  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '01', 'home', 'Home', '1 Example Ln')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '1', 'home', 'Home', '1 Example Ln')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd')").run();
   db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
   return db;

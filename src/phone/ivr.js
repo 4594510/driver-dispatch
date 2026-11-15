@@ -7,12 +7,12 @@ import { greetingPrompt, farewellPrompt } from "./greeting.js";
 import { nowIso, audit } from "../db.js";
 import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
-import { keypadTime, localParts, canChangePickup, normalCode } from "../rules.js";
+import { keypadTime, localParts, canChangePickup } from "../rules.js";
 import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
 import { AREA_KM } from "../travel.js";
-import { allPlaces, codeMatches, savePlace, MAX_CODE_DIGITS, SAY_CODE } from "../places.js";
+import { allPlaces, codeMatches, savePlace, MAX_CODE_DIGITS } from "../places.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
 import { peopleForFamily } from "../relations.js";
@@ -37,6 +37,8 @@ const WINDOW = 15;
 // is under "more options" at the read-back, and each of those comes back to the read-back.
 
 const P = (code) => ({ prompt: code });
+// A second of quiet when the call is answered, before the greeting (Shloime, 2026-11-15).
+const QUIET = { pause: 1000 };
 
 // ctx: { db, travel, settings, now, base, notify(booking, kind, payload) }
 export async function phoneStep(ctx, body) {
@@ -416,14 +418,14 @@ const STEPS = {
       .get(today(c).day, c.from);
     if (offered) {
       c.st.offered = offered.id;
-      return ask("time_in", [P(greetingPrompt(c.now, c.settings.timeZone)), timeQuestion(c, offered, offered.proposed_minute, offered.pickup_minute)]);
+      return ask("time_in", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), timeQuestion(c, offered, offered.proposed_minute, offered.pickup_minute)]);
     }
     if (waiting) {
       c.st.reminder = waiting.booking_id;
-      return ask("reminder_in", [P(greetingPrompt(c.now, c.settings.timeZone)), P("P05")]);
+      return ask("reminder_in", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), P("P05")]);
     }
     // A schedule change today: say it right away (no rides today, or today's other hours).
-    return ask("menu", [P(greetingPrompt(c.now, c.settings.timeZone)), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
+    return ask("menu", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
   },
   async time_in(c) {
     const b = c.st.offered ? getBooking(c.db, c.st.offered) : null;
@@ -592,7 +594,11 @@ const STEPS = {
   to_code: (c) => placeCode(c, "to", "when"),
   when(c) {
     if (c.keys === "1") {
-      if (!fitsToday(c, today(c).minute)) return end([hoursToday(c)]);
+      // Outside today's hours: say them and go back to the menu (the call is not cut off).
+      if (!fitsToday(c, today(c).minute)) {
+        c.st.draft = null;
+        return ask("menu", [hoursToday(c), MENU]);
+      }
       c.st.draft.pickupMinute = null;
       c.st.draft.window = WINDOW;
       return toReadBack(c);
@@ -694,7 +700,6 @@ function pickPlace(c, which, next) {
     if (home) return setPlace(c, which, home, next);
     return retry(c, which, Q[which]());
   }
-  if (normalCode(c.keys) === SAY_CODE) return listen(`${which}_say`, [P("P56")]); // 100: say a new address
   const matches = /^\d+$/.test(c.keys) ? codeMatches(c.db, c.keys, c.phone.household_id) : [];
   if (!matches.length) return retry(c, which, Q[which]());
   if (matches.length > 1) return askChoice(c, which, matches);
@@ -778,7 +783,6 @@ function chosen(c, which, then) {
 
 function placeCode(c, which, next) {
   if (c.keys === "0") return ask(`${which}_code`, [placeList(c), P("P13")], CODE_KEYS);
-  if (normalCode(c.keys) === SAY_CODE) return listen(`${which}_say`, [P("P56")]); // 100: say a new address
   const matches = /^\d+$/.test(c.keys) ? codeMatches(c.db, c.keys, c.phone.household_id) : [];
   if (!matches.length) return retry(c, `${which}_code`, Q[`${which}_code`](), CODE_KEYS);
   if (matches.length > 1) return askChoice(c, which, matches);

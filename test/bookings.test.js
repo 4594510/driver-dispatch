@@ -9,7 +9,7 @@ function setup() {
   const db = openDb(":memory:");
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
   db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
-  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '01', 'home', 'Home', '1 Example Ln, Monsey')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('home', 'hh1', '1', 'home', 'Home', '1 Example Ln, Monsey')").run();
   db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd, Spring Valley')").run();
   db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
   return db;
@@ -35,7 +35,7 @@ test("a ride request is saved as pending, with its return trip", () => {
 test("another household's place can be used (every saved address is for everyone), a removed one cannot", () => {
   const db = setup();
   db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh2', 'Family B', 'x')").run();
-  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('other', 'hh2', '01', 'Home', '9 Other St')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('other', 'hh2', '1', 'Home', '9 Other St')").run();
   assert.ok(requestRide(db, ask({ pickup: { placeId: "other" } }), now).ok);
   db.prepare("UPDATE places SET active = 0 WHERE id = 'other'").run();
   assert.ok(requestRide(db, ask({ pickup: { placeId: "other" } }), now).errors.includes("no_pickup"));
