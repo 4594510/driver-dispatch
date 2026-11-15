@@ -82,6 +82,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/driver.js: the driver app's API (/api/driver: phone + PIN sign-in, Bearer token, today, status, location,
   preview, actions with once-only keys, route order). web/driver/: the app page; android/: the APK wrapper (Java,
   WebView + TrackingService for GPS and request notifications), built by .github/workflows/android.yml.
+- src/appupdate.js: the newest app from the GitHub release "driver-app" (build N = versionCode), sent in /today as
+  app; an older app shows "New app version ready" with one Update button (android Updater.java: download, Android's
+  installer asks) and the service notifies once per version. Needs the fixed signing key (DRIVER_KEYSTORE_* secrets).
 - src/backup.js: the daily database copy. Dockerfile, railway.json, docs/going-live.md: hosting and the pilot.
 - src/server.js: admin sign-in and API, serves the dashboard at /admin/ and the driver app at /driver/. A phone
   belongs to a whole family or to one person in it (phones.passenger_id); a person's own phone books that person without asking.

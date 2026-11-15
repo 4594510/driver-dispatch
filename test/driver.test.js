@@ -15,7 +15,7 @@ const travel = {
 async function withDay(fn) {
   const db = openDb(":memory:");
   let clock = new Date("2026-11-11T15:00:00Z"); // 10:00 AM New York
-  const app = createApp(db, { ADMIN_EMAIL: "admin@example.com", ADMIN_PASSWORD: "first-password-1" }, { travel, now: () => clock });
+  const app = createApp(db, { ADMIN_EMAIL: "admin@example.com", ADMIN_PASSWORD: "first-password-1" }, { travel, now: () => clock, appRelease: () => ({ version: 9, url: "https://example.com/driver-app.apk" }) });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   let cookie = "";
@@ -59,6 +59,7 @@ test("the driver signs in with phone and PIN; a wrong PIN or no token is refused
     assert.equal(ok.status, 200);
     setToken(ok.body.token);
     assert.equal((await call("/api/driver/today")).body.driver.name, "Driver");
+    assert.deepEqual((await call("/api/driver/today")).body.app, { version: 9, url: "https://example.com/driver-app.apk" }, "the newest app, for the update notice");
     // A new PIN signs the old phone out.
     await call("/api/admin/drivers/drv1/pin", "POST", { pin: "9999" });
     assert.equal((await call("/api/driver/today")).status, 401);

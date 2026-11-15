@@ -244,10 +244,20 @@ function render() {
   $("#req-count").hidden = !n;
   const main = $("#main");
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === (tab === "hours" ? "more" : tab));
-  if (tab === "next") main.innerHTML = nextView();
+  if (tab === "next") main.innerHTML = updateView() + nextView();
   else if (tab === "day") main.innerHTML = dayView();
   else if (tab === "hours") main.innerHTML = `<button class="ghost" data-tab-go="more">← Back</button>${hoursView()}`;
-  else main.innerHTML = moreView();
+  else main.innerHTML = updateView() + moreView();
+}
+
+// A newer Android app is out: one card with one button (the app downloads it and Android asks "Update?").
+function newerApp() {
+  let mine = 0;
+  try { mine = Number(native?.appVersion?.()) || 0; } catch { /* old app without it */ }
+  return native?.update && today.app?.version > mine ? today.app : null;
+}
+function updateView() {
+  return newerApp() ? `<div class="card"><h2>New app version ready</h2><button class="good big" data-update>Update</button></div>` : "";
 }
 
 function navLink(s) {
@@ -593,6 +603,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (ds.auto != null) { await act("/api/driver/route/auto", {}, { queueable: false, ok: "Back to the best order" }); return; }
+  if (ds.update != null) { const app = newerApp(); if (app) native.update(app.url); return; }
   if (ds.refresh != null) { await load(); toast("Loaded"); return; }
   if (ds.signout != null) {
     if (!confirm("Sign out?")) return;
