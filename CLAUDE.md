@@ -41,6 +41,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - The driver is tracked only while at work (online, after Start work) (Shloime, 2026-11-13): on a break or after Stop
   work the app sends no GPS, the server drops points from those times and forgets the last position, and the dashboard
   shows "location not shared". Late points from inside a work stretch still count (drivers.online_since / off_at).
+  Never tracked outside the service hours of the day (schedule changes included), even while online; the driver can
+  turn sharing off in the app (More; drivers.share_location, shared_since) (feedback, 2026-11-15). The app turns GPS
+  on only when the server's today says driver.tracking.
 - Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
   rides on the Now screen with "Take it" / "Can't", one big button per stop.
 

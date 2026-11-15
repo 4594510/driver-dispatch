@@ -13,7 +13,7 @@ import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
 import { getSettings } from "./settings.js";
-import { scheduleView, addChange, removeChange } from "./schedule.js";
+import { scheduleView, addChange, removeChange, dayHours } from "./schedule.js";
 import { priorityOf } from "./priority.js";
 
 const priorityFields = (db, b) => {
@@ -61,6 +61,49 @@ export function atWork(d, at) {
   return !!(d.online_since && d.off_at && t >= d.online_since && t <= d.off_at);
 }
 
+// Is this moment inside the service hours of its day (today's schedule change included)? Outside them the driver is
+// never tracked, even while he is online.
+export function inServiceHours(db, settings, at) {
+  const { day, minute } = localParts(at, settings.timeZone);
+  const usual = settings.usualOpenMinute != null ? { ...settings, openMinute: settings.usualOpenMinute, closeMinute: settings.usualCloseMinute } : settings;
+  const h = dayHours(db, day, usual);
+  return !h.closed && minute >= h.openMinute && minute < h.closeMinute;
+}
+
+// May a GPS point taken at this time be kept? Only while at work, with sharing on, and inside the service hours.
+export function mayKeepPoint(db, settings, d, at) {
+  if (!atWork(d, at) || d.share_location === 0) return false;
+  if (d.shared_since && at.toISOString() < d.shared_since) return false;
+  return inServiceHours(db, settings, at);
+}
+
+// Is the driver's location shared right now? (The app turns GPS on only then; the dashboard shows it only then.)
+export function sharingNow(db, settings, d, now = new Date()) {
+  return d.status === "online" && d.share_location !== 0 && inServiceHours(db, settings, now);
+}
+
+// Why the location isn't shown: "off_work", "turned_off" (by the driver) or "outside_hours"; null when it is shared.
+export function notSharedReason(db, settings, d, now = new Date()) {
+  if (d.status !== "online") return "off_work";
+  if (d.share_location === 0) return "turned_off";
+  if (!inServiceHours(db, settings, now)) return "outside_hours";
+  return null;
+}
+
+// Forget the last position when it may not be shown now.
+export function forgetIfHidden(db, settings, d, now = new Date()) {
+  if (d.last_lat == null || sharingNow(db, settings, d, now)) return d;
+  db.prepare("UPDATE drivers SET last_lat = NULL, last_lng = NULL, last_seen_at = NULL WHERE id = ?").run(d.id);
+  return { ...d, last_lat: null, last_lng: null, last_seen_at: null };
+}
+
+// The driver turns location sharing off or on (app, More). Off forgets the last position at once.
+export function setSharing(db, id, on, actor, now = new Date()) {
+  if (on) db.prepare("UPDATE drivers SET share_location = 1, shared_since = ? WHERE id = ?").run(now.toISOString(), id);
+  else db.prepare("UPDATE drivers SET share_location = 0, last_lat = NULL, last_lng = NULL, last_seen_at = NULL WHERE id = ?").run(id);
+  audit(db, actor, on ? "driver_location_on" : "driver_location_off", null, { driverId: id });
+}
+
 // Paused drivers come back online by themselves when the pause runs out.
 export function driverNow(db, id, now = new Date()) {
   const d = db.prepare("SELECT * FROM drivers WHERE id = ?").get(id);
@@ -77,7 +120,11 @@ export function driverAvailable(db, now = new Date()) {
   return ids.some(({ id }) => driverNow(db, id, now)?.status === "online");
 }
 
-const publicDriver = (d) => ({ id: d.id, name: d.name, phone: d.phone, status: d.status, paused_until: d.paused_until });
+// tracking: whether the app should send GPS now (at work, sharing on, inside the service hours).
+const publicDriver = (d, tracking = false) => ({
+  id: d.id, name: d.name, phone: d.phone, status: d.status, paused_until: d.paused_until,
+  share_location: d.share_location !== 0, tracking,
+});
 
 // ctx(): { db, travel, settings, now, notify } for this request.
 export function driverRouter(db, ctxFor) {
@@ -129,9 +176,9 @@ export function driverRouter(db, ctxFor) {
   // Everything the app shows: the driver, today's route with its stops, and the requests waiting for an answer.
   r.get("/today", (req, res) => {
     const c = ctxFor();
-    const d = driverNow(db, req.driverId, c.now);
+    const d = forgetIfHidden(db, c.settings, driverNow(db, req.driverId, c.now), c.now);
     const here = localParts(c.now, c.settings.timeZone);
-    res.json({ driver: publicDriver(d), ...todayFor(db, here), hours: hoursOf(c.settings) });
+    res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings) });
   });
 
   // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).
@@ -147,7 +194,17 @@ export function driverRouter(db, ctxFor) {
     const until = status === "paused" && minutes > 0 ? new Date(c.now.getTime() + Math.min(minutes, 480) * 60000).toISOString() : null;
     setDriverStatus(db, req.driverId, status, until, c.now);
     audit(db, req.actor, `driver_${status}`, null, until ? { until } : {});
-    return { ok: true, driver: publicDriver(driverNow(db, req.driverId, c.now)) };
+    const d = driverNow(db, req.driverId, c.now);
+    return { ok: true, driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)) };
+  }));
+
+  // Location sharing on or off (the driver's own choice, app More screen).
+  r.post("/sharing", once(async (req) => {
+    const c = ctxFor();
+    if (typeof req.body?.on !== "boolean") return { ok: false, errors: ["bad_value"] };
+    setSharing(db, req.driverId, req.body.on, req.actor, c.now);
+    const d = driverNow(db, req.driverId, c.now);
+    return { ok: true, driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)) };
   }));
 
   // GPS points, one or a batch (the app keeps them while there's no signal). The newest is the live position.
@@ -159,13 +216,14 @@ export function driverRouter(db, ctxFor) {
       .filter((p) => Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 && Number.isFinite(p.lat) && Number.isFinite(p.lng) && !Number.isNaN(p.at.getTime()))
       .slice(0, 2000);
     if (!pts.length) return res.status(400).json({ ok: false, errors: ["no_points"] });
-    // Only points from while he was at work are kept; the rest are dropped (answered ok, so the app lets go of them).
-    const d = driverNow(db, req.driverId, c.now);
+    // Only points from while he was at work, sharing, inside the service hours are kept; the rest are dropped
+    // (answered ok, so the app lets go of them).
+    const d = forgetIfHidden(db, c.settings, driverNow(db, req.driverId, c.now), c.now);
     const when = (p) => (p.at > c.now ? c.now : p.at); // a phone clock ahead of ours counts as now
-    const kept = pts.filter((p) => atWork(d, when(p)));
+    const kept = pts.filter((p) => mayKeepPoint(db, c.settings, d, when(p)));
     const add = db.prepare("INSERT INTO driver_locations (driver_id, at, lat, lng, accuracy, speed) VALUES (?, ?, ?, ?, ?, ?)");
     for (const p of kept) add.run(req.driverId, when(p).toISOString(), p.lat, p.lng, p.accuracy, p.speed);
-    if (d.status !== "online") return res.json({ ok: true, saved: kept.length, dropped: pts.length - kept.length, refreshed: false });
+    if (!sharingNow(db, c.settings, d, c.now)) return res.json({ ok: true, saved: kept.length, dropped: pts.length - kept.length, refreshed: false });
     if (kept.length) {
       const last = kept.reduce((a, b) => (b.at > a.at ? b : a));
       if (!d.last_seen_at || when(last).toISOString() >= d.last_seen_at) {

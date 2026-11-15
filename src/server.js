@@ -25,7 +25,7 @@ import { localParts } from "./rules.js";
 import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
-import { driverRouter, setPin, driverNow, setDriverStatus } from "./driver.js";
+import { driverRouter, setPin, driverNow, setDriverStatus, forgetIfHidden, notSharedReason } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
 import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
 import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
@@ -370,10 +370,14 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   admin.get("/drivers", (_req, res) => {
     const rows = db.prepare("SELECT id FROM drivers ORDER BY name").all();
     res.json(rows.map(({ id }) => {
-      const { pin_hash: pin, online_since: _since, off_at: _off, ...d } = driverNow(db, id, clock());
-      // No position is shown while the driver is not at work.
-      const where = d.status === "online" ? {} : { last_lat: null, last_lng: null, last_seen_at: null };
-      return { ...d, ...where, has_pin: !!pin };
+      const now = clock();
+      const settings = getSettings(db, now);
+      const full = forgetIfHidden(db, settings, driverNow(db, id, now), now);
+      const { pin_hash: pin, online_since: _since, off_at: _off, shared_since: _shared, ...d } = full;
+      // No position is shown while the driver is not at work, turned sharing off, or it is outside the service hours.
+      const reason = notSharedReason(db, settings, full, now);
+      const where = reason ? { last_lat: null, last_lng: null, last_seen_at: null } : {};
+      return { ...d, ...where, share_location: d.share_location !== 0, not_shared: reason, has_pin: !!pin };
     }));
   });
   admin.post("/drivers/:id/pin", (req, res) => {

@@ -216,6 +216,8 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
   addColumns(db, "drivers", { pin_hash: "TEXT" }); // the app's sign-in: the driver's phone and a PIN set by an admin
   // The driver's last stretch at work (online): GPS points are kept only from inside it, see driver.js.
   addColumns(db, "drivers", { online_since: "TEXT", off_at: "TEXT" });
+  // The driver may turn location sharing off in the app (More); when he turns it back on, points count from then on.
+  addColumns(db, "drivers", { share_location: "INTEGER NOT NULL DEFAULT 1", shared_since: "TEXT" });
   db.exec("UPDATE drivers SET last_lat = NULL, last_lng = NULL, last_seen_at = NULL WHERE status != 'online' AND last_lat IS NOT NULL");
   addColumns(db, "routes", { manual: "INTEGER NOT NULL DEFAULT 0" }); // the driver set the order by hand: keep it
   db.exec(`
