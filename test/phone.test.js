@@ -54,6 +54,9 @@ test("Yiddish numbers and times", () => {
   assert.deepEqual(timePieces(14 * 60 + 30), ["צוויי", "דרייסיג", "נאכמיטאג"]);
   assert.deepEqual(timePieces(10 * 60 + 5), ["צען", "נול", "פינף", "אינדערפרי"]);
   assert.deepEqual(timePieces(12 * 60), ["צוועלף", "נאכמיטאג"]);
+  assert.equal(timePieces(23 * 60 + 55).at(-1), "ביינאכט", "11:55 PM is at night, not afternoon");
+  assert.equal(timePieces(11 * 60 + 55).at(-1), "אינדערפרי");
+  assert.equal(timePieces(19 * 60).at(-1), "אין אוונט");
   assert.ok(Object.keys(PROMPTS).length >= 48);
 });
 
@@ -698,4 +701,18 @@ test("a question about a ride when no ride is being ordered goes to the menu", a
     assert.deepEqual(prompts(r), ["P04"], step);
     assert.equal(r.gather.step, "menu");
   }
+});
+
+test("after the pickup place the caller hears it back, a pause, then 'to'; the hours at the start only when changed or closed now", async () => {
+  const db = setup();
+  const r = await call(db, ["1", "1", "20"]);
+  const last = r.at(-1);
+  assert.equal(last.gather.step, "to");
+  assert.deepEqual(said(last).slice(0, 2), ["פון", "שול"]);
+  assert.ok(last.play.some((p) => p.pause), "a short pause before the next question");
+  assert.deepEqual(prompts(last), ["P12"]);
+  const open = await phoneStep(ctx(db), { call_id: "h1", from: "8455550001", step: "start", keys: "" });
+  assert.ok(!prompts(open).includes("P48"), "open as usual: no hours");
+  const late = await phoneStep(ctx(db, { now: new Date("2026-11-12T01:00:00Z") }), { call_id: "h2", from: "8455550001", step: "start", keys: "" });
+  assert.ok(prompts(late).includes("P48"), "8 PM: closed now, so today's hours are said");
 });

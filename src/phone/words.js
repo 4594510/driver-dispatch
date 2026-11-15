@@ -123,6 +123,8 @@ export const W = {
   woman: "פרוי",
   morning: "אינדערפרי",
   afternoon: "נאכמיטאג",
+  evening: "אין אוונט",
+  night: "ביינאכט",
   minutes: "מינוט",
   press: "דריקט",
   back: "צוריק",
@@ -159,7 +161,9 @@ export function timePieces(minute) {
   const out = [numberWords(hour)];
   if (m > 0 && m < 10) out.push(ONES[0], ONES[m]);
   else if (m) out.push(numberWords(m));
-  out.push(h24 < 12 ? W.morning : W.afternoon);
+  // Part of the day (Shloime, 2026-11-15: 11:55 at night is not נאכמיטאג): before 5 AM and from 9 PM ביינאכט, until
+  // noon אינדערפרי, until 5 PM נאכמיטאג, then אין אוונט.
+  out.push(h24 < 5 || h24 >= 21 ? W.night : h24 < 12 ? W.morning : h24 < 17 ? W.afternoon : W.evening);
   return out;
 }
 export const timeText = (minute) => timePieces(minute).join(" ");

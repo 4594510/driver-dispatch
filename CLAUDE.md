@@ -32,7 +32,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   5 PM, P87 א גוטע נאכט after) + the season's: 15 Av to Rosh Hashana P80+P90 (כתיבה וחתימה טובה, א גוט געבענטשט יאר),
   to Yom Kippur P81 (גמר חתימה טובה), to Hoshana Rabba P84 (גמר חותם חיים), Hoshana Rabba P85 (א גוט קוויטל). Chol Hamoed incl. Hoshana Rabba and erev the last days of Pesach greets P77 (א גוטן מועד). A second
   of quiet before the greeting. Each question is the gather's own prompt (keys pressed during a separate play reach
-  Teltech's next gather one digit at a time). Asking for "now" outside the hours goes back to the menu.
+  Teltech's next gather one digit at a time). Asking for "now" outside the hours goes back to the menu. Today's hours are said at the start only when changed today or the
+  line is closed right now. After the pickup place the caller hears "פון <place>", a short pause, then the "to" question
+  (and "קיין <place>" before "when"). Times end with אינדערפרי (to noon), נאכמיטאג (to 5 PM), אין אוונט (to 9 PM),
+  ביינאכט (2026-11-15). A refused phone booking logs why ("phone booking refused": routed rides, driver spot).
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
   2026-11-12). The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0

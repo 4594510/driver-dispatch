@@ -403,6 +403,7 @@ async function bookOnce(c) {
     for (const b of r.bookings) c.notify?.(b, "booked");
     return { booked: true, res: end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]) };
   }
+  console.log(`phone booking refused ..${String(c.from).slice(-4)}: ${r.errors.join(",")}${r.why ? ` ${JSON.stringify(r.why)}` : ""} offered=${JSON.stringify(r.suggestions || [])}`);
   const refusal = refusalOf(c, r.errors[0]);
   if (r.suggestions?.length) {
     const offer = r.suggestions[0];
@@ -432,7 +433,9 @@ const STEPS = {
       return ask("reminder_in", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), P("P05")]);
     }
     // A schedule change today: say it right away (no rides today, or today's other hours).
-    return ask("menu", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), c.settings.scheduleChanged ? hoursToday(c) : null, MENU]);
+    // Today's hours only when they changed today or the line is not open right now (Shloime, 2026-11-15).
+    const sayHours = c.settings.scheduleChanged || !fitsToday(c, today(c).minute);
+    return ask("menu", [QUIET, P(greetingPrompt(c.now, c.settings.timeZone)), sayHours ? hoursToday(c) : null, MENU]);
   },
   async time_in(c) {
     const b = c.st.offered ? getBooking(c.db, c.st.offered) : null;
@@ -807,7 +810,10 @@ function setPlace(c, which, place, next) {
   if (which === "to" && place.id === c.st.draft.from) return retry(c, "to", Q.to());
   c.st.draft[which] = place.id;
   c.st.draft[`${which}Address`] = null;
-  return onward(c, next);
+  if (c.st.draft.editing) return onward(c, next);
+  // Say the place back ("from the shul"), a short pause, then the next question, so "from" and "to" don't run
+  // together (Shloime, 2026-11-15).
+  return ask(next, [c.say(which === "from" ? W.from : W.to), c.name(place), { pause: 700 }, Q[next]()]);
 }
 
 function myRides(c) {
