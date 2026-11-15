@@ -21,6 +21,9 @@ export async function rideAction(ctx, id, action, body, actor, driverId) {
   if (action === "propose") {
     const minute = Number(body?.minute);
     if (!Number.isInteger(minute) || minute < settings.openMinute || minute > settings.closeMinute) return { ok: false, errors: ["bad_time"] };
+    // A time that already passed can't be offered (the caller would agree and the ride still wouldn't fit).
+    const here = localParts(now, settings.timeZone);
+    if (was.day === here.day && minute < here.minute) return { ok: false, errors: ["past_time"] };
     const r = proposeTime(db, id, minute, driverId, now);
     if (r.ok) notify(r.booking, "time_change", { oldMinute: was.pickup_minute, newMinute: minute });
     return r;

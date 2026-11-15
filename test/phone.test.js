@@ -660,3 +660,42 @@ test("the call opens with a second of quiet before the greeting (Shloime, 2026-1
   const r = await phoneStep(ctx(db), { call_id: "q", from: "8455550001", step: "start", keys: "" });
   assert.deepEqual(r.play[0], { pause: 1000 });
 });
+
+test("a wrong key or no key at 'which ride' asks again; the call is not cut off", async () => {
+  const db = setup();
+  await call(db, ["1", "1", "0", "20", "2", "1200", "1"]);
+  // 3 cancel: the list, then no key, then a number that is no ride: asked again both times (it used to crash into P03).
+  const r = await call(db, ["3", "", "7"], { id: "c2" });
+  assert.deepEqual(prompts(r[2]).slice(0, 2), ["P43", "P32"]);
+  assert.deepEqual(prompts(r[3]).slice(0, 2), ["P42", "P32"]);
+  assert.equal(r[3].hangup, false);
+  // The same at "which ride to change" (two rides, so it asks which).
+  await call(db, ["1", "1", "0", "20", "2", "0100", "1"], { id: "c3" });
+  const ch = await call(db, ["2", "2", ""], { id: "c4" });
+  assert.equal(ch[2].gather.step, "change_which");
+  assert.deepEqual(prompts(ch[3]).slice(0, 2), ["P43", "P47"]);
+});
+
+test("a line where nobody says or presses anything is let go; it doesn't go round for ever", async () => {
+  const db = setup();
+  const c = ctx(db, { travel: { ...travel, lookup: async () => ({ status: "not_found" }) } });
+  let body = { call_id: "quiet", from: "8455550001", step: "start", keys: "" };
+  const keys = ["1", "1"]; // order a ride, for myself, then silence
+  let steps = 0;
+  for (; steps < 40; steps++) {
+    const r = await phoneStep(c, body);
+    if (r.hangup) break;
+    body = r.listen ? { call_id: "quiet", from: "8455550001", step: r.listen.step, keys: "", transcript: "" } : { call_id: "quiet", from: "8455550001", step: r.gather.step, keys: keys.shift() ?? "" };
+  }
+  assert.ok(steps < 15, `still going after ${steps} steps`);
+});
+
+test("a question about a ride when no ride is being ordered goes to the menu", async () => {
+  const db = setup();
+  await phoneStep(ctx(db), { call_id: "n1", from: "8455550001", step: "start", keys: "" });
+  for (const step of ["women", "time", "to", "from_keep", "who_pick"]) {
+    const r = await phoneStep(ctx(db), { call_id: "n1", from: "8455550001", step, keys: "1" });
+    assert.deepEqual(prompts(r), ["P04"], step);
+    assert.equal(r.gather.step, "menu");
+  }
+});

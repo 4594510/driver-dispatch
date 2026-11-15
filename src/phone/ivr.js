@@ -182,9 +182,14 @@ async function inbound(c) {
   const phone = approvedPhone(c.db, c.from);
   if (!phone) return { play: [P("P02")], hangup: true };
   c.phone = phone;
-  const handler = STEPS[c.step] || STEPS.start;
+  const handler = Object.hasOwn(STEPS, c.step) ? STEPS[c.step] : STEPS.start;
+  // A question about a ride being ordered, but no ride is being ordered (it was just booked, or dropped): the menu.
+  if (DRAFT_STEPS.has(c.step) && !c.st.draft) return ask("menu", MENU);
   return handler(c);
 }
+const DRAFT_STEPS = new Set(["who", "who_pick", "with", "extra", "extra_men", "extra_women", "men", "women", "together", "from", "from_code",
+  "from_say", "from_ok", "from_keep", "from_choose", "to", "to_code", "to_say", "to_ok", "to_keep", "to_choose", "when", "time", "ret", "ret_time",
+  "more", "confirm"]);
 
 const today = (c) => localParts(c.now, c.settings.timeZone);
 
@@ -715,7 +720,15 @@ async function heardAddress(c, which) {
     c.st.tries ||= {};
     c.st.tries[`${which}_say`] = (c.st.tries[`${which}_say`] || 0) + 1;
     // After two misses, back to choosing a saved place.
-    if (c.st.tries[`${which}_say`] > TRIES) { settle(c, `${which}_say`); return which === "add" ? ask("menu", [why, MENU]) : ask(which, [why, Q[which]()]); }
+    if (c.st.tries[`${which}_say`] > TRIES) {
+      settle(c, `${which}_say`);
+      if (which === "add") return ask("menu", [why, MENU]);
+      // The second time round with still no address (nobody is on the line): goodbye, not for ever.
+      c.st.rounds ||= {};
+      c.st.rounds[which] = (c.st.rounds[which] || 0) + 1;
+      if (c.st.rounds[which] > 1) return end([why]);
+      return ask(which, [why, Q[which]()]);
+    }
     return listen(`${which}_say`, [why, P("P56")]);
   };
   if (!text) return again(P("P43"));

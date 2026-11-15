@@ -3,12 +3,18 @@
 
 const DAY = 86400000;
 
+const formats = new Map(); // making a formatter is slow; one per kind and time zone is kept
+const format = (locale, opts) => {
+  const key = `${locale}|${opts.timeZone}`;
+  if (!formats.has(key)) formats.set(key, new Intl.DateTimeFormat(locale, opts));
+  return formats.get(key);
+};
 function jewishDate(when, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-u-ca-hebrew", { timeZone, day: "numeric", month: "long" }).formatToParts(when);
+  const parts = format("en-u-ca-hebrew", { timeZone, day: "numeric", month: "long" }).formatToParts(when);
   return { day: Number(parts.find((p) => p.type === "day").value), month: parts.find((p) => p.type === "month").value };
 }
 function localHourAndWeekday(when, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23", weekday: "short" }).formatToParts(when);
+  const parts = format("en-US", { timeZone, hour: "numeric", hourCycle: "h23", weekday: "short" }).formatToParts(when);
   return { hour: Number(parts.find((p) => p.type === "hour").value), weekday: parts.find((p) => p.type === "weekday").value };
 }
 

@@ -293,3 +293,16 @@ test("driving ignores long gaps and standing still", () => {
   assert.deepEqual(driving([p(41, 0), p(41, 30), p(41, 60)]), { minutes: 0, miles: 0 });
   assert.equal(driving([p(41, 0), { ...p(41.01, 0), at: "2026-11-11T17:30:00Z" }]).miles, 0);
 });
+
+test("a time that already passed can't be offered to the caller", async () => {
+  await withDay(async ({ call, at }) => {
+    const b = (await call("/api/admin/bookings", "POST", ride({ pickupMinute: 630 }))).body.bookings[0];
+    at("2026-11-11T16:00:00Z"); // 11:00 AM: the ride asked for 10:30 is still waiting
+    const past = await call(`/api/admin/bookings/${b.id}/propose`, "POST", { minute: 645 });
+    assert.equal(past.status, 400);
+    assert.deepEqual(past.body.errors, ["past_time"]);
+    const ahead = await call(`/api/admin/bookings/${b.id}/propose`, "POST", { minute: 675 });
+    assert.equal(ahead.status, 200);
+    assert.equal(ahead.body.booking.status, "proposed");
+  });
+});

@@ -44,6 +44,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - An offered time nobody answers goes back to the driver as a waiting request after 20 minutes (bookings.js
   expireOffers). The "book it" key sent twice in one call books once. Once a day old GPS points, call rows, sent
   messages and logs are removed (src/cleanup.js). .github/workflows/test.yml runs the tests on every pull request.
+- Third review (2026-11-15): the seat search remembers dead ends (seating.js planSeats, in pickup order), so a booking on
+  a day with 14+ rides answers at once (it froze the server for minutes); a wrong key at "which ride" asks again; a
+  line where nobody answers is let go after the second round of "say the address"; drive times from the driver's own
+  spot are fetched one way, to the next hour's stops, the spot rounded to 100 m (dispatch.js prefetch); a time that
+  already passed can't be offered (past_time).
 - The driver is tracked only while at work (online, after Start work) (Shloime, 2026-11-13): on a break or after Stop
   work the app sends no GPS, the server drops points from those times and forgets the last position, and the dashboard
   shows "location not shared". Late points from inside a work stretch still count (drivers.online_since / off_at).

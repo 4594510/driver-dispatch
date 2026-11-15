@@ -4,6 +4,7 @@ import { openDb } from "../src/db.js";
 import { bookRide, previewAccept, acceptRide, refreshDay, dayRoute } from "../src/dispatch.js";
 import { changeStatus, getBooking } from "../src/bookings.js";
 import { DEFAULT_SETTINGS } from "../src/rules.js";
+import { createTravel } from "../src/travel.js";
 
 const now = new Date("2026-11-11T15:00:00Z"); // 10:00 AM New York
 const day = "2026-11-11";
@@ -186,4 +187,52 @@ test("a package rides along on the route with no seats", async () => {
   const route = dayRoute(db, day);
   assert.equal(route.stops.length, 4);
   assert.ok(route.seatsByStop.every((s) => s.rows.reduce((n, r) => n + r.men + r.women, 0) <= 7));
+});
+
+test("drive times from the driver's own spot are asked only one way, to the stops of the coming hour, and a waiting driver's spot stays the same", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  const asked = [];
+  travel.ensure = async (legs) => { asked.push(...legs); };
+  for (const m of [10 * 60 + 30, 15 * 60]) {
+    const r = await bookRide(db, travel, ask({ pickupMinute: m }), now, settings);
+    await acceptRide(db, travel, r.bookings[0].id, "drv1", settings, now);
+  }
+  const seen = new Date(now.getTime() - 60000).toISOString();
+  db.prepare("UPDATE drivers SET status = 'online', last_lat = 43.00012, last_lng = -74.00031, last_seen_at = ? WHERE id = 'drv1'").run(seen);
+  asked.length = 0;
+  await refreshDay(db, travel, day, settings, now);
+  const spot = "43.00000,-74.00000";
+  assert.ok(asked.some((l) => l.a === spot), "the driver's spot, to about 100 metres");
+  assert.ok(!asked.some((l) => l.b === spot), "never back to where the driver is");
+  // Home and the shul of the 10:30 ride; the 3 PM ride is hours away.
+  assert.deepEqual([...new Set(asked.filter((l) => l.a === spot).map((l) => l.b))].sort(), ["41.00000,-74.00000", "51.00000,-74.00000"]);
+  assert.equal(asked.filter((l) => l.a === spot).length, 2);
+  // A few metres on (still waiting at the same stop): the same spot.
+  db.prepare("UPDATE drivers SET last_lat = 43.00041, last_lng = -74.00012 WHERE id = 'drv1'").run();
+  asked.length = 0;
+  await refreshDay(db, travel, day, settings, now);
+  assert.ok(asked.filter((l) => l.a.startsWith("43.")).every((l) => l.a === spot));
+});
+
+test("a booking on a full day is answered at once (14 rides on the route used to freeze the server for minutes)", async () => {
+  const db = openDb(":memory:");
+  db.prepare("INSERT INTO households (id, name, created_at) VALUES ('hh1', 'Family A', 'x')").run();
+  db.prepare("INSERT INTO phones (number, household_id) VALUES ('+18455550001', 'hh1')").run();
+  db.prepare("INSERT INTO drivers (id, name, phone) VALUES ('drv1', 'Driver', '+18455550100')").run();
+  for (let i = 0; i < 12; i++) {
+    db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES (?, NULL, ?, ?, ?, ?, ?)")
+      .run(`p${i}`, String(i + 1), `P${i}`, `${i} St`, 41.1 + (i % 4) * 0.012, -74.07 + Math.floor(i / 4) * 0.015);
+  }
+  const travel = createTravel(db, {}); // no map key: straight-line estimates
+  const book = (extra) => bookRide(db, travel, { phone: "+18455550001", riderName: "R", window: 15, ...extra }, now, DEFAULT_SETTINGS);
+  for (let i = 0; i < 14; i++) {
+    const r = await book({ men: i % 3 === 0 ? 3 : 1, women: i % 3 === 1 ? 3 : i % 3 === 2 ? 2 : 0, pickup: { placeId: `p${i % 12}` }, dropoff: { placeId: `p${(i + 5) % 12}` }, pickupMinute: 10 * 60 + 15 + i * 25 });
+    assert.ok(r.ok, JSON.stringify(r.errors));
+    assert.ok((await acceptRide(db, travel, r.bookings[0].id, "drv1", DEFAULT_SETTINGS, now, { override: true })).ok);
+  }
+  const t = Date.now();
+  const r = await book({ men: 2, women: 2, pickup: { placeId: "p1" }, dropoff: { placeId: "p7" }, pickupMinute: null });
+  assert.ok(r.ok, JSON.stringify(r.errors));
+  assert.ok(Date.now() - t < 3000, `took ${Date.now() - t} ms`);
 });
