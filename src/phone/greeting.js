@@ -39,14 +39,36 @@ export function greetingPrompt(now, timeZone = "America/New_York") {
   return "P74"; // א גוטן אוונט
 }
 
-// The goodbye (Shloime, 2026-11-15): from 15 Av until Rosh Hashana "a kesiva vachasima tova", from Rosh Hashana through
-// Yom Kippur "a gmar chasima tova", after Yom Kippur until before Hoshana Rabba "gmar chosem chaim", on Hoshana Rabba
-// "a gut kvitel", else P41.
-export function farewellPrompt(now, timeZone = "America/New_York") {
+// The goodbye (Shloime, 2026-11-15), every call: "yasher koach", the wish of the day, then the wish of the season.
+// The day: erev Yom Tov (also Hoshana Rabba and erev the last days of Pesach) a gut yom tov, Friday a gut Shabbos, Chol
+// Hamoed a gutn moed, Chanukah, Purim, motzei Shabbos a gute voch (only then), Rosh Chodesh a gutn chodesh, else a gutn
+// tog until 5 PM and a gute nacht after. The season: from 15 Av until Rosh Hashana a kesiva vachasima tova and a gut
+// gebentsht yor, through Yom Kippur a gmar chasima tova, after it gmar chosem chaim, on Hoshana Rabba a gut kvitel.
+// Returns the prompt codes in order.
+export function farewellPrompts(now, timeZone = "America/New_York") {
   const { day, month } = jewishDate(now, timeZone);
-  if ((month === "Av" && day >= 15) || month === "Elul") return "P80"; // יישר כח, א כתיבה וחתימה טובה
-  if (month === "Tishri" && day <= 10) return "P81"; // יישר כח, א גמר חתימה טובה
-  if (month === "Tishri" && day <= 20) return "P84"; // יישר כח, גמר חותם חיים
-  if (month === "Tishri" && day === 21) return "P85"; // יישר כח, א גוט קוויטל
-  return "P41";
+  const { hour, weekday } = localHourAndWeekday(now, timeZone);
+  const moed = CHOL_HAMOED[month];
+  const inMoed = moed && day >= moed[0] && day <= moed[1];
+  const erevYomTov = EREV_YOM_TOV[month]?.includes(day) || (month === "Tishri" && day === 21) || (month === "Nisan" && day === 20);
+  let chanukah = false;
+  for (let k = 0; k < 8; k++) {
+    const d = jewishDate(new Date(now.getTime() - k * DAY), timeZone);
+    if (d.month === "Kislev" && d.day === 25) chanukah = true;
+  }
+  const dayWish = erevYomTov ? "P89" // א גוט יום טוב
+    : weekday === "Fri" ? "P88" // א גוט שבת
+    : inMoed ? "P77" // א גוטן מועד
+    : chanukah ? "P78" // א לעכטיגן חנוכה
+    : (month === "Adar" || month === "Adar II") && (day === 14 || day === 15) ? "P79" // א פרייליכן פורים
+    : weekday === "Sat" ? "P75" // א גוטע וואך (motzei Shabbos only)
+    : day === 30 || (day === 1 && month !== "Tishri") ? "P76" // א גוטן חודש
+    : hour < 17 ? "P73" // א גוטן טאג
+    : "P87"; // א גוטע נאכט
+  const season = (month === "Av" && day >= 15) || month === "Elul" ? ["P80", "P90"] // א כתיבה וחתימה טובה, א גוט געבענטשט יאר
+    : month === "Tishri" && day <= 10 ? ["P81"] // א גמר חתימה טובה
+    : month === "Tishri" && day <= 20 ? ["P84"] // גמר חותם חיים
+    : month === "Tishri" && day === 21 ? ["P85"] // א גוט קוויטל
+    : [];
+  return ["P86", dayWish, ...season]; // יישר כח
 }

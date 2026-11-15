@@ -26,9 +26,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   the menu) (Shloime, 2026-11-13). P69 unused. The main menu stays as it was (Shloime, 2026-11-12). P10, P18,
   P60-P64 and P68 unused. The call opens with a greeting for the day, not the line name (src/phone/greeting.js,
   P72-P79, P82-P83: time of day, Rosh Chodesh, Chol Hamoed, Chanukah, Purim, erev Shabbos, erev Yom Tov, a gute
-  voch only on motzei Shabbos; P01 unused). The goodbye instead of P41 (Shloime, 2026-11-15): 15 Av to Rosh Hashana P80
-  (כתיבה וחתימה טובה), to Yom Kippur P81 (גמר חתימה טובה), then to Hoshana Rabba P84 (גמר חותם חיים), Hoshana Rabba P85
-  (א גוט קוויטל). Chol Hamoed incl. Hoshana Rabba and erev the last days of Pesach greets P77 (א גוטן מועד). A second
+  voch only on motzei Shabbos; P01 unused). Every goodbye (Shloime, 2026-11-15; greeting.js farewellPrompts) replaces P41
+  with P86 יישר כח + the wish of the day (erev Yom Tov incl. Hoshana Rabba P89 א גוט יום טוב, Friday P88 א גוט שבת, Chol
+  Hamoed P77, Chanukah P78, Purim P79, motzei Shabbos only P75 א גוטע וואך, Rosh Chodesh P76, else P73 א גוטן טאג until
+  5 PM, P87 א גוטע נאכט after) + the season's: 15 Av to Rosh Hashana P80+P90 (כתיבה וחתימה טובה, א גוט געבענטשט יאר),
+  to Yom Kippur P81 (גמר חתימה טובה), to Hoshana Rabba P84 (גמר חותם חיים), Hoshana Rabba P85 (א גוט קוויטל). Chol Hamoed incl. Hoshana Rabba and erev the last days of Pesach greets P77 (א גוטן מועד). A second
   of quiet before the greeting. Each question is the gather's own prompt (keys pressed during a separate play reach
   Teltech's next gather one digit at a time). Asking for "now" outside the hours goes back to the menu.
   From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
@@ -73,11 +75,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   is not reserved any more, 2026-11-15). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P85 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P90 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P85 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P90 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
