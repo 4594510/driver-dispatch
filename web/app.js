@@ -636,7 +636,7 @@ async function schedule() {
 
 // ---------- announcements ----------
 async function announce() {
-  const [list, fams] = await Promise.all([api("/api/admin/announcements"), api("/api/admin/households")]);
+  const [list, fams, senders] = await Promise.all([api("/api/admin/announcements"), api("/api/admin/households"), api("/api/admin/senders")]);
   main.innerHTML = `
     <div class="card"><h2>Send an announcement</h2>
       <form id="ann">
@@ -644,10 +644,14 @@ async function announce() {
         <label>Recording for the calls (optional; without one the call reads the text in Yiddish) <input name="audio" type="file" accept="audio/*"></label>
         <label>To <select name="audience"><option value="all">Everyone</option>${fams.map((h) => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join("")}</select></label>
         <button>Send</button>
-        <p class="quiet">Messages go out once the phone line is connected (stage 4). Until then they wait in the queue.</p>
+        <p class="quiet">Phones set to texts get a text; phones set to calls get a call that reads it out. Messages go out once Teltech's sending is connected. Until then they wait in the queue.</p>
       </form></div>
-    <div class="card"><h2>Sent</h2>${list.length ? `<table><thead><tr><th>When</th><th>Message</th><th>Deliveries</th></tr></thead><tbody>${list.map((a) => `
-      <tr><td>${esc(new Date(a.created_at).toLocaleString())}</td><td>${esc(a.text)}${a.recording ? '<div class="quiet">with recording</div>' : ""}</td>
+    <div class="card"><h2>Who may send by text</h2>
+      <p class="quiet">A text from one of these numbers to the ride line goes to everyone, the same way. The sender gets a text back saying it was sent. The driver can also send one from the app (More).</p>
+      ${senders.length ? `<table><tbody>${senders.map((s) => `<tr data-sender="${esc(s.number)}"><td>${esc(s.name)}</td><td>${esc(s.number)}</td><td class="actions"><button class="ghost" data-act="rm-sender">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="quiet">Nobody yet.</p>'}
+      <form id="sender" class="row"><input name="name" placeholder="Name" required><input name="number" placeholder="Phone number" required><button>Add</button></form></div>
+    <div class="card"><h2>Sent</h2>${list.length ? `<table><thead><tr><th>When</th><th>From</th><th>Message</th><th>Deliveries</th></tr></thead><tbody>${list.map((a) => `
+      <tr><td>${esc(new Date(a.created_at).toLocaleString())}</td><td>${esc(a.from || "")}</td><td>${esc(a.text)}${a.recording ? '<div class="quiet">with recording</div>' : ""}</td>
       <td>${a.deliveries} · reached ${a.reached} · not reached ${a.not_reached}</td></tr>`).join("")}</tbody></table>` : '<p class="quiet">Nothing yet.</p>'}</div>`;
   $("#ann").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -665,6 +669,16 @@ async function announce() {
       toast(`Queued for ${r.phones} phones`);
       open("announce");
     });
+  });
+  $("#sender").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    if (await act(() => api("/api/admin/senders", { method: "POST", body: { name: f.get("name"), number: f.get("number") } }), "Added")) open("announce");
+  });
+  main.addEventListener("click", async (e) => {
+    if (e.target.dataset.act !== "rm-sender") return;
+    const n = e.target.closest("[data-sender]").dataset.sender;
+    if (confirm("Remove this number? Texts from it won't be sent any more.") && (await act(() => api(`/api/admin/senders/${encodeURIComponent(n)}`, { method: "DELETE" }), "Removed"))) open("announce");
   });
 }
 

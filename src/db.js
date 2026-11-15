@@ -296,6 +296,12 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    -- Numbers that may send a message to everyone by texting the line (announcements.js textIn).
+    CREATE TABLE IF NOT EXISTS message_senders (
+      number TEXT PRIMARY KEY,                   -- E.164, +18455551234
+      name TEXT NOT NULL,
+      added_at TEXT NOT NULL
+    );
   `);
   return db;
 }

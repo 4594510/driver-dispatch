@@ -176,6 +176,22 @@ test("reports: waiting, on time, ride length, and driving from GPS", async () =>
   });
 });
 
+test("the driver sends a message to everyone from the app, once per key", async () => {
+  await withDay(async ({ call, db, setToken }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    assert.equal((await call("/api/driver/announce", "POST", { text: " " })).status, 400);
+    assert.equal((await call("/api/driver/announce", "POST", { text: "x".repeat(501) })).status, 400, "too long for a call");
+    const r = await call("/api/driver/announce", "POST", { text: "Running 20 minutes behind", key: "k1" });
+    assert.equal(r.body.phones, 1);
+    await call("/api/driver/announce", "POST", { text: "Running 20 minutes behind", key: "k1" });
+    assert.equal(db.prepare("SELECT count(*) AS n FROM announcements").get().n, 1, "sent again with the same key: once");
+    assert.equal(texts(db, "announcement").length, 1);
+    assert.equal((await call("/api/driver/announcements")).body[0].text, "Running 20 minutes behind");
+    assert.equal((await call("/api/admin/announcements")).body[0].from, "Driver Driver");
+  });
+});
+
 test("the driver is tracked only while at work: nothing kept or shown on a break or after Stop work", async () => {
   await withDay(async ({ call, db, setToken, at }) => {
     await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });

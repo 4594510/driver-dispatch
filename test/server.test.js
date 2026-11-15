@@ -130,6 +130,35 @@ test("an announcement queues a delivery per phone by its setting", async () => {
   });
 });
 
+test("a text from an approved sender goes to everyone; the sender is told; other numbers are ignored", async () => {
+  await withServer(async (call, db) => {
+    await signIn(call);
+    const hh = (await call("/api/admin/households", "POST", { name: "Family A" })).body.id;
+    await call("/api/admin/phones", "POST", { number: "8455550001", householdId: hh, notify: "text" });
+    await call("/api/admin/phones", "POST", { number: "8455550002", householdId: hh, notify: "voice" });
+    assert.equal((await call("/api/admin/senders", "POST", { name: "Shloime", number: "12" })).status, 400);
+    assert.equal((await call("/api/admin/senders", "POST", { name: "Shloime", number: "(845) 555-0900" })).status, 200);
+    assert.deepEqual((await call("/api/admin/senders")).body.map((s) => s.number), ["+18455550900"]);
+    // Not from Teltech's line (no key): refused.
+    assert.equal((await call("/fonory/text", "POST", { from: "18455550900", text: "Hi" })).status, 403);
+    // A number not on the list: nothing is sent.
+    assert.equal((await call("/fonory/text?key=hook-secret", "POST", { from: "18455550111", text: "Hi" })).body.ok, false);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM announcements").get().n, 0);
+    const r = await call("/fonory/text?key=hook-secret", "POST", { from: "18455550900", text: "No rides after 4 today" });
+    assert.equal(r.body.ok, true);
+    const a = db.prepare("SELECT * FROM announcements").get();
+    assert.equal(a.text, "No rides after 4 today");
+    const rows = db.prepare("SELECT phone, channel FROM deliveries WHERE announcement_id = ? ORDER BY phone").all(a.id);
+    assert.deepEqual(rows.map((d) => `${d.phone.slice(-1)}${d.channel[0]}`), ["1t", "2v"], "text phones get a text, call phones a call");
+    const reply = db.prepare("SELECT * FROM deliveries WHERE kind = 'sender_reply'").get();
+    assert.equal(reply.phone, "+18455550900");
+    assert.match(reply.body, /2 phones/);
+    assert.equal((await call("/api/admin/announcements")).body[0].from, "Text from Shloime (+18455550900)");
+    assert.equal((await call("/api/admin/senders/8455550900", "DELETE")).status, 200);
+    assert.equal((await call("/fonory/text?key=hook-secret", "POST", { from: "18455550900", text: "Again" })).body.ok, false);
+  });
+});
+
 test("the dashboard page is served", async () => {
   await withServer(async (call) => {
     assert.equal((await call("/health")).body.ok, true);
