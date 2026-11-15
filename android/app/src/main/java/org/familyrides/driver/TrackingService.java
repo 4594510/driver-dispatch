@@ -223,7 +223,8 @@ public class TrackingService extends Service implements LocationListener {
                     stopSelf();
                     return;
                 }
-                setGps("online".equals(driverStatus));
+                // GPS only when the server says so: online, sharing on, inside the service hours.
+                setGps(today.getJSONObject("driver").optBoolean("tracking", "online".equals(driverStatus)));
             } else if (status == 401) {
                 stopSelf();
                 return;

@@ -192,8 +192,8 @@ let points = store.get("driver.points", []);
 function track() {
   const status = today?.driver?.status;
   if (native) {
-    // The app's own service rings for new requests, also with the screen off, and sends GPS only while online
-    // (on a break it keeps checking, so it knows when the break is over, but shares no location).
+    // The app's own service rings for new requests, also with the screen off, and sends GPS only while the server
+    // says so (online, sharing on, inside the service hours); on a break it keeps checking but shares no location.
     const on = status && status !== "offline";
     const want = on ? `on:${token}` : "off";
     if (want === tracking) return;
@@ -202,8 +202,8 @@ function track() {
     else native.stopTracking?.();
     return;
   }
-  // Without the Android app: GPS only while online (Start work), never on a break or after Stop work.
-  const on = status === "online";
+  // Without the Android app: GPS only while the server says so (at work, sharing on, inside the service hours).
+  const on = status === "online" && today?.driver?.tracking !== false;
   if (on && watch == null && navigator.geolocation) {
     watch = navigator.geolocation.watchPosition((p) => {
       points.push({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, speed: p.coords.speed, at: new Date(p.timestamp).toISOString() });
@@ -339,6 +339,8 @@ function moreView() {
   return `<div class="card">
     ${d.status === "online" ? '<button class="ghost big" data-status="paused">Take a break…</button>' : ""}
     <button class="ghost big" data-late>Running late…</button>
+    <button class="ghost big" data-sharing="${d.share_location ? "off" : "on"}">${d.share_location ? "Stop sharing my location" : "Share my location again"}</button>
+    <p class="quiet">${d.share_location ? "Your location is shared only while you are at work, inside the service hours." : "Your location is not shared. The office can't see where you are."}</p>
     <button class="ghost big" data-tab-go="hours">My hours (days off)</button>
     <button class="ghost big" data-feedback>Send a message to the office…</button>
     <button class="ghost big" data-refresh>Load again</button></div>
@@ -539,6 +541,12 @@ document.addEventListener("click", async (e) => {
     if (ds.status === "paused") return pauseSheet();
     if (ds.status === "offline" && !confirm("Stop work? New rides will wait until you start again.")) return;
     await act("/api/driver/status", { status: ds.status }, { ok: ds.status === "online" ? "Started. Rides will come in" : "Stopped" });
+    return;
+  }
+  if (ds.sharing) {
+    const on = ds.sharing === "on";
+    if (!on && !confirm("Stop sharing your location? The office won't see where you are, and late notices are less exact.")) return;
+    await act("/api/driver/sharing", { on }, { ok: on ? "Location shared again" : "Location not shared" });
     return;
   }
   if (ds.pause) { closeSheet(); await act("/api/driver/status", { status: "paused", minutes: Number(ds.pause) }, { ok: "Paused" }); return; }

@@ -224,6 +224,69 @@ test("the driver is tracked only while at work: nothing kept or shown on a break
   });
 });
 
+test("the driver can turn location sharing off, and is never tracked outside the service hours", async () => {
+  await withDay(async ({ call, db, setToken, at }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    const pt = (lat, iso) => ({ lat, lng: -74, at: iso });
+    const send = async (...points) => (await call("/api/driver/location", "POST", { points })).body;
+    const shown = async () => (await call("/api/admin/drivers")).body[0];
+    const me = async () => (await call("/api/driver/today")).body.driver;
+
+    // Started work before the hours (9:30 AM): online, but no GPS asked for or kept until 10.
+    at("2026-11-11T14:30:00Z");
+    await call("/api/driver/status", "POST", { status: "online" });
+    assert.equal((await me()).tracking, false);
+    assert.equal((await send(pt(41, "2026-11-11T14:40:00Z"))).saved, 0);
+    assert.equal((await shown()).not_shared, "outside_hours");
+    at("2026-11-11T15:05:00Z"); // 10:05 AM
+    assert.equal((await me()).tracking, true);
+    assert.equal((await send(pt(41.1, "2026-11-11T14:55:00Z"), pt(41.2, "2026-11-11T15:04:00Z"))).saved, 1, "only the point from inside the hours");
+    assert.equal((await shown()).last_lat, 41.2);
+
+    // He turns sharing off: forgotten at once, nothing kept, the app stops GPS, the office sees why.
+    at("2026-11-11T15:10:00Z");
+    const off = await call("/api/driver/sharing", "POST", { on: false, key: "s1" });
+    assert.equal(off.status, 200);
+    assert.equal(off.body.driver.tracking, false);
+    assert.equal(off.body.driver.share_location, false);
+    assert.equal(db.prepare("SELECT last_lat FROM drivers").get().last_lat, null);
+    assert.equal((await send(pt(41.3, "2026-11-11T15:11:00Z"))).saved, 0);
+    const s = await shown();
+    assert.equal(s.last_lat, null);
+    assert.equal(s.not_shared, "turned_off");
+    assert.equal((await call("/api/driver/sharing", "POST", { on: "yes" })).status, 400);
+
+    // Back on: points from then on only.
+    at("2026-11-11T15:20:00Z");
+    assert.equal((await call("/api/driver/sharing", "POST", { on: true, key: "s2" })).body.driver.tracking, true);
+    assert.equal((await send(pt(41.4, "2026-11-11T15:15:00Z"), pt(41.5, "2026-11-11T15:20:00Z"))).saved, 1);
+    assert.equal((await shown()).not_shared, null);
+
+    // After the hours (6 PM), still online: the position is forgotten, the app stops GPS, and points are dropped.
+    at("2026-11-11T23:01:00Z");
+    assert.equal((await me()).tracking, false);
+    const after = await shown();
+    assert.equal(after.last_lat, null);
+    assert.equal(after.not_shared, "outside_hours");
+    assert.equal((await send(pt(41.6, "2026-11-11T23:00:30Z"))).saved, 0);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM driver_locations").get().n, 2);
+  });
+});
+
+test("a day with no rides (schedule) is outside the service hours: never tracked", async () => {
+  await withDay(async ({ call, setToken, at }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    const r = await call("/api/driver/schedule", "POST", { from: "2026-11-12", to: "2026-11-12", closed: true, key: "c1" });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    at("2026-11-12T16:00:00Z"); // 11 AM on the day off
+    await call("/api/driver/status", "POST", { status: "online" });
+    assert.equal((await call("/api/driver/today")).body.driver.tracking, false);
+    assert.equal((await call("/api/driver/location", "POST", { points: [{ lat: 41, lng: -74, at: "2026-11-12T16:00:00Z" }] })).body.saved, 0);
+  });
+});
+
 test("driving ignores long gaps and standing still", () => {
   const p = (lat, s) => ({ lat, lng: -74, at: new Date(Date.UTC(2026, 10, 11, 17, 0, s)).toISOString() });
   assert.deepEqual(driving([p(41, 0), p(41, 30), p(41, 60)]), { minutes: 0, miles: 0 });
