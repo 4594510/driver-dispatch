@@ -66,7 +66,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/dispatch.js: bookRide (with nearest times that fit), previewAccept, acceptRide, refreshDay, dayRoute. Only
   accepted and on-board rides are in the route (routes table); pending ones are checked against it.
 - src/phone/ivr.js: the phone menu, one answer per Fonory step (POST /fonory/step), incoming and outgoing calls.
-  "#" alone at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe and barge-in: the question is the collect's own prompt; the only
+  "#" alone at "from"/"to" is a one-time address: the caller says it (Teltech's voice collect with transcribe; the question plays in full first, no barge-in since 2026-11-15: noise cut it off; the only
   spoken step), travel.lookup finds it, it is read back in English (P56-P59), then kept for everyone
   or for this ride only (P65-P66). Menu key 6 just adds an address. "#" skips a question with the usual answer (SKIP, P67).
 - src/places.js: saved addresses, usable by everyone (codes 1-6 digits, no leading zero, default the house number; 100
