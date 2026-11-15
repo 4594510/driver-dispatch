@@ -32,7 +32,7 @@ jobs:
           KEYSTORE_B64: ${{ secrets.DRIVER_KEYSTORE_B64 }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/driver.jks"
+            printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/driver.jks"
             echo "DRIVER_KEYSTORE_FILE=$RUNNER_TEMP/driver.jks" >> "$GITHUB_ENV"
           else
             echo "No signing key set: the APK is signed with a temporary key."
