@@ -15,6 +15,7 @@ import { seatPeople } from "./relations.js";
 
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
+const START_MINUTES = 60; // legs from the driver's own spot are fetched only to stops this soon
 const NEAR_MINUTES = 90; // legs between stops further apart in time than this are never driven back to back
 
 // One change to the route at a time. Accepting and re-timing wait for Google in the middle, so two at the same moment
@@ -91,7 +92,9 @@ function routedRows(db, day) {
 function driverPoint(db, now) {
   const d = db.prepare("SELECT * FROM drivers WHERE last_lat IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1").get();
   if (!d?.last_seen_at || now.getTime() - new Date(d.last_seen_at).getTime() > DRIVER_FRESH_MINUTES * 60000) return undefined;
-  return pointKey(d.last_lat, d.last_lng) ?? undefined;
+  // To about 100 metres: a driver waiting at a stop keeps the same point, so its drive times are asked for once.
+  const near = (x) => Math.round(x * 1000) / 1000;
+  return pointKey(near(d.last_lat), near(d.last_lng)) ?? undefined;
 }
 
 // Planning context. For today, the route starts now, from the driver's last GPS point when it's fresh (stage 5),
@@ -114,11 +117,17 @@ async function prefetch(db, travel, rides, ctx) {
     pts.push({ k: r.from, t: r.windowStart });
     pts.push({ k: r.to, t: r.windowEnd + 15 });
   }
-  if (ctx.start?.at) pts.push({ k: ctx.start.at, t: ctx.start.minute });
   const legs = [];
   for (const a of pts) {
     for (const b of pts) {
       if (a.k && b.k && a.k !== b.k && Math.abs(a.t - b.t) <= NEAR_MINUTES) legs.push({ a: a.k, b: b.k, minute: a.t });
+    }
+  }
+  // From where the driver is now: only to the stops of the coming hour, and never back to that spot. (The spot is new
+  // at every GPS refresh, so each of these legs is paid for; both ways to every stop was most of the Google bill.)
+  if (ctx.start?.at) {
+    for (const b of pts) {
+      if (b.k && b.k !== ctx.start.at && b.t - ctx.start.minute <= START_MINUTES) legs.push({ a: ctx.start.at, b: b.k, minute: ctx.start.minute });
     }
   }
   await travel.ensure(legs);

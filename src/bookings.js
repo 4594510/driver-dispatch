@@ -160,7 +160,8 @@ export function requestRide(db, input, now = new Date(), settings = DEFAULT_SETT
 }
 
 export function getBooking(db, id) {
-  return db.prepare("SELECT * FROM bookings WHERE id = ?").get(id) || null;
+  if (id == null) return null; // a wrong key at "which ride": no ride, not a crash
+  return db.prepare("SELECT * FROM bookings WHERE id = ?").get(String(id)) || null;
 }
 
 // Driver accepts: seats are checked again (things may have changed) and saved on the booking.

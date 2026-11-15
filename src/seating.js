@@ -183,7 +183,15 @@ export function planSeats(bookings, layout = DEFAULT_LAYOUT) {
     }
     return { b, opts };
   });
-  items.sort((x, y) => (y.b.seats ? 1 : 0) - (x.b.seats ? 1 : 0) || x.opts.length - y.opts.length || y.b.men + y.b.women - (x.b.men + x.b.women));
+  // In pickup order (riders on board first: their pickup is -1), so that what was chosen for rides already dropped off
+  // can't matter for the ones still to come; among the same stop, the ones with the fewest options first.
+  items.sort((x, y) => x.b.pickup - y.b.pickup || (y.b.seats ? 1 : 0) - (x.b.seats ? 1 : 0) || x.opts.length - y.opts.length || y.b.men + y.b.women - (x.b.men + x.b.women));
+  // For each position: the earlier rides that are still on board with any ride from here on. Only their choices decide
+  // whether the rest can be seated, so a dead end is remembered by them and never walked twice. (Without this a full
+  // day of 15 rides took 10 seconds to find out that one more doesn't fit, and the caller's booking timed out.)
+  const live = items.map((_, k) => items.slice(0, k).map((x, j) => (items.slice(k).some((y) => overlaps(x.b, y.b)) ? j : -1)).filter((j) => j >= 0));
+  const picked = [];
+  const dead = new Set();
 
   const chosen = new Map();
   const fits = (b, opt) => {
@@ -201,13 +209,17 @@ export function planSeats(bookings, layout = DEFAULT_LAYOUT) {
   };
   const search = (k) => {
     if (k === items.length) return true;
+    const key = `${k}:${live[k].map((j) => picked[j]).join(",")}`;
+    if (dead.has(key)) return false;
     const { b, opts } = items[k];
-    for (const opt of opts) {
-      if (!fits(b, opt)) continue;
-      chosen.set(b, opt);
+    for (let i = 0; i < opts.length; i++) {
+      if (!fits(b, opts[i])) continue;
+      chosen.set(b, opts[i]);
+      picked[k] = i;
       if (search(k + 1)) return true;
       chosen.delete(b);
     }
+    dead.add(key);
     return false;
   };
   if (!search(0)) return { ok: false, reason: "no_seating" };

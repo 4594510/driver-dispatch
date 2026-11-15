@@ -25,7 +25,7 @@ const ERRORS = {
   not_pending: "This ride isn't waiting for an answer any more.", no_time: "The route can't fit this ride without making others late.",
   no_seats: "The seats don't work for this.", wrong_status: "Not possible now (the ride changed).", bad_time: "Choose a time within service hours.",
   dropoff_before_pickup: "A drop-off can't come before its pickup.", route_changed: "The route changed meanwhile. Look again.",
-  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.",
+  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", past_time: "That time already passed. Choose a later one.",
 };
 const errText = (data) => (data?.errors || []).map((e) => ERRORS[e] || e).join(" ") || data?.error || "Something went wrong.";
 
@@ -493,7 +493,10 @@ function proposeSheet(id) {
   const base = r ? r.window[0] : 600;
   const times = [];
   const h = today.hours || { openMinute: 600, closeMinute: 1080 };
-  for (let m = base - 60; m <= base + 90; m += 15) if (m !== base && m >= h.openMinute && m <= h.closeMinute) times.push(m);
+  // Only times still ahead: for a ride asked for "now" a while ago, the choices start from now, not from its old time.
+  const nowM = today.minute + Math.max(0, Math.round((Date.now() - (lastOk || Date.now())) / 60000));
+  const from = Math.max(base - 60, Math.ceil(nowM / 5) * 5);
+  for (let m = from; times.length < 10 && m <= h.closeMinute; m += 15) if (m !== base && m >= h.openMinute) times.push(m);
   sheet(`<h2>Suggest a time for ${esc(r?.rider_name || "this ride")}</h2><p class="quiet">The caller is asked to agree.</p>
     <div class="chips">${times.map((m) => `<button class="ghost" data-propose-at="${m}" data-id="${id}">${minuteText(m)}</button>`).join("")}</div>
     <button class="ghost big" data-close>Cancel</button>`);
