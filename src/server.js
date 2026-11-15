@@ -20,7 +20,7 @@ import * as auth from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { scheduleView, addChange, removeChange } from "./schedule.js";
 import { report } from "./reports.js";
-import { createAnnouncement, listAnnouncements } from "./announcements.js";
+import { createAnnouncement, listAnnouncements, listSenders, addSender, removeSender, textIn } from "./announcements.js";
 import { localParts } from "./rules.js";
 import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
@@ -96,6 +96,16 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     const result = req.body?.result || req.body?.status;
     if (!callId || !result) return res.status(400).json({ error: "call_id and result are needed" });
     res.json({ ok: true, outcome: callEnded(db, String(callId), String(result), clock()) });
+  });
+  // A text sent to the line. Teltech's incoming-text request isn't documented yet, so the usual field names are read.
+  // From an approved sender (dashboard, Announcements) it goes to everyone; anything else is only logged.
+  fonory.post("/text", (req, res) => {
+    const b = req.body || {};
+    const from = normalizePhone(b.from ?? b.caller_id ?? b.sender ?? b.phone ?? b.number);
+    const text = String(b.text ?? b.body ?? b.message ?? b.content ?? "").trim();
+    const r = textIn(db, from, text);
+    console.log(`text in ..${String(from || "").slice(-4)} -> ${r.ok ? `sent to ${r.phones} phones` : r.error} (fields: ${Object.keys(b).join(",")})`);
+    res.json({ ok: r.ok });
   });
   app.use("/fonory", fonory);
   // Audio Fonory plays from us: saved pieces and uploaded recordings, under random names.
@@ -510,6 +520,16 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   admin.get("/announcements", (_req, res) => res.json(listAnnouncements(db)));
   admin.post("/announcements", (req, res) => {
     const r = createAnnouncement(db, req.body, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  // Numbers that may send a message to everyone by texting the line.
+  admin.get("/senders", (_req, res) => res.json(listSenders(db)));
+  admin.post("/senders", (req, res) => {
+    const r = addSender(db, normalizePhone(req.body?.number), req.body?.name, req.actor);
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
+  admin.delete("/senders/:number", (req, res) => {
+    const r = removeSender(db, normalizePhone(req.params.number), req.actor);
     r.ok ? res.json(r) : bad(res, r.error);
   });
   admin.post("/recordings", express.raw({ type: "audio/*", limit: "5mb" }), (req, res) => {

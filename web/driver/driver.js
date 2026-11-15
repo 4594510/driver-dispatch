@@ -352,6 +352,7 @@ function moreView() {
     <button class="ghost big" data-sharing="${d.share_location ? "off" : "on"}">${d.share_location ? "Stop sharing my location" : "Share my location again"}</button>
     <p class="quiet">${d.share_location ? "Your location is shared only while you are at work, inside the service hours." : "Your location is not shared. The office can't see where you are."}</p>
     <button class="ghost big" data-tab-go="hours">My hours (days off)</button>
+    <button class="ghost big" data-everyone>Send a message to everyone…</button>
     <button class="ghost big" data-feedback>Send a message to the office…</button>
     <button class="ghost big" data-refresh>Load again</button></div>
     <div class="card"><h2>${esc(d.name)}</h2><p class="quiet">${esc(d.phone)}</p>
@@ -527,6 +528,18 @@ async function feedbackSheet() {
     ${past.length ? `<h3>Sent before</h3>${past.map((f) => `<div class="card"><p>${esc(f.text)}</p><p class="quiet">${esc(new Date(f.created_at).toLocaleDateString())} · ${esc(FB_STATUS[f.status] || f.status)}</p>${f.reply ? `<p class="quiet">Answer: ${esc(f.reply)}</p>` : ""}</div>`).join("")}` : ""}`);
 }
 
+// A message to everyone: text phones get a text, call phones get a call that reads it out.
+async function everyoneSheet() {
+  let past = [];
+  try { const r = await api("/api/driver/announcements"); if (r.ok) past = r.data; } catch { /* no signal */ }
+  sheet(`<h2>Message to everyone</h2>
+    <p class="quiet">Phones set to texts get a text. Phones set to calls get a call that reads it out.</p>
+    <label>Write the message <textarea id="ev-text" rows="4" maxlength="500"></textarea></label>
+    <button class="good big" data-everyone-send>Send to everyone</button>
+    <button class="ghost big" data-close>Close</button>
+    ${past.length ? `<h3>Sent before</h3>${past.map((a) => `<div class="card"><p>${esc(a.text)}</p><p class="quiet">${esc(new Date(a.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</p></div>`).join("")}` : ""}`);
+}
+
 // Local change right away, so the driver can go on without signal.
 function markLocal(id, status) {
   if (!today) return;
@@ -580,6 +593,16 @@ document.addEventListener("click", async (e) => {
   if (ds.proposeAt) { closeSheet(); await act(`/api/driver/bookings/${ds.id}/propose`, { minute: Number(ds.proposeAt) }, { queueable: false, ok: "Sent to the caller" }); return; }
   if (ds.late != null) return lateSheet();
   if (ds.feedback != null) return feedbackSheet();
+  if (ds.everyone != null) return everyoneSheet();
+  if (ds.everyoneSend != null) {
+    const text = $("#ev-text").value.trim();
+    if (!text) { toast("Write the message first."); return; }
+    if (!confirm("Send this to everyone?")) return;
+    closeSheet();
+    const r = await act("/api/driver/announce", { text }, { queueable: false });
+    if (r) toast(`Sent to ${r.phones} phones`);
+    return;
+  }
   if (ds.feedbackSend != null) {
     const text = $("#fb-text").value.trim();
     if (!text) { toast("Write something first."); return; }

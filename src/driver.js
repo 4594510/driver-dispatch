@@ -21,6 +21,7 @@ const priorityFields = (db, b) => {
   return { priority: p.level, priority_label: p.label };
 };
 import { addFeedback, listFeedback } from "./feedback.js";
+import { createAnnouncement } from "./announcements.js";
 
 const SESSION_DAYS = 90;
 const STATUSES = ["online", "offline", "paused"];
@@ -273,6 +274,10 @@ export function driverRouter(db, ctxFor, appRelease = () => null) {
   // Comments, complaints, suggestions and requests: the driver's own, with the answers.
   r.get("/feedback", (req, res) => res.json(listFeedback(db, { source: "driver", author: req.driverId, limit: 50 })));
   r.post("/feedback", once(async (req) => addFeedback(db, req.body, "driver", req.driverId)));
+
+  // A message to everyone: a text to text phones, a call that reads it to call phones (each phone's setting).
+  r.get("/announcements", (_req, res) => res.json(db.prepare("SELECT id, text, created_at FROM announcements ORDER BY created_at DESC LIMIT 5").all()));
+  r.post("/announce", once(async (req) => createAnnouncement(db, { text: req.body?.text }, req.actor)));
 
   return r;
 }

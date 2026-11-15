@@ -37,6 +37,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   2026-11-12). The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
   women, takes no seats; the name field is a note, "Package: ..."); the driver app shows "Package only". Not on the phone yet.
+- A message to everyone (Shloime, 2026-11-15) is sent from the dashboard (Announcements), the driver app (More, "Send a
+  message to everyone"), or by texting the line from a number on the dashboard's "Who may send by text" list
+  (message_senders; Teltech posts it to /fonory/text, field names not final). Text phones get a text, call phones a call
+  that reads it out; the texter gets "Sent to everyone (N phones)" back. At most 500 letters.
 - A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
