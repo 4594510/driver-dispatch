@@ -25,11 +25,13 @@ android {
     signingConfigs {
         release {
             def ks = System.getenv("DRIVER_KEYSTORE_FILE")
+            // A pasted secret often carries a space or a line break at the end: not part of the password.
+            def pw = (System.getenv("DRIVER_KEYSTORE_PASSWORD") ?: "").trim()
             if (ks) {
                 storeFile file(ks)
-                storePassword System.getenv("DRIVER_KEYSTORE_PASSWORD")
+                storePassword pw
                 keyAlias System.getenv("DRIVER_KEY_ALIAS") ?: "driver"
-                keyPassword System.getenv("DRIVER_KEYSTORE_PASSWORD")
+                keyPassword pw
             }
         }
     }
