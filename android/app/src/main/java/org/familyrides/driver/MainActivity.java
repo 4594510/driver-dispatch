@@ -46,6 +46,13 @@ public class MainActivity extends Activity {
         String base = serverUrl(this);
         if (base.isEmpty()) askForServer();
         else web.loadUrl(base + "/driver/");
+        if (Updater.ACTION_DONE.equals(getIntent().getAction())) Updater.onResult(this, getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (Updater.ACTION_DONE.equals(intent.getAction())) Updater.onResult(this, intent);
     }
 
     static String serverUrl(Context c) {
@@ -126,6 +133,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void stopTracking() {
             runOnUiThread(() -> TrackingService.stop(MainActivity.this));
+        }
+
+        // The app's build number, so the page can tell when a newer app is out.
+        @JavascriptInterface
+        public int appVersion() {
+            return BuildConfig.VERSION_CODE;
+        }
+
+        @JavascriptInterface
+        public void update(String url) {
+            runOnUiThread(() -> Updater.start(MainActivity.this, url));
         }
 
         @JavascriptInterface

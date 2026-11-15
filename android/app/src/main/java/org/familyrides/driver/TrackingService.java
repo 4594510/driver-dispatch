@@ -207,6 +207,7 @@ public class TrackingService extends Service implements LocationListener {
             if (status == 200) {
                 JSONObject today = new JSONObject(out.toString());
                 String driverStatus = today.getJSONObject("driver").getString("status");
+                updateNotice(today.optJSONObject("app"));
                 JSONArray reqs = today.getJSONArray("requests");
                 StringBuilder fresh = new StringBuilder();
                 for (int i = 0; i < reqs.length(); i++) {
@@ -282,6 +283,15 @@ public class TrackingService extends Service implements LocationListener {
             .setContentIntent(openApp(c))
             .build();
         c.getSystemService(NotificationManager.class).notify((int) (System.currentTimeMillis() % 100000) + 10, n);
+    }
+
+    // A newer app is out: one notification per new version; opening the app shows the Update button.
+    private void updateNotice(JSONObject app) {
+        if (app == null) return;
+        int version = app.optInt("version", 0);
+        if (version <= BuildConfig.VERSION_CODE || MainActivity.prefs(this).getInt("updateNoticed", 0) >= version) return;
+        MainActivity.prefs(this).edit().putInt("updateNoticed", version).apply();
+        notifyRequest(this, "App update ready", "Open the app and press Update");
     }
 
     static PendingIntent openApp(Context c) {

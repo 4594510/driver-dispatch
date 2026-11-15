@@ -127,7 +127,7 @@ const publicDriver = (d, tracking = false) => ({
 });
 
 // ctx(): { db, travel, settings, now, notify } for this request.
-export function driverRouter(db, ctxFor) {
+export function driverRouter(db, ctxFor, appRelease = () => null) {
   const r = express.Router();
 
   r.post("/login", (req, res) => {
@@ -178,7 +178,8 @@ export function driverRouter(db, ctxFor) {
     const c = ctxFor();
     const d = forgetIfHidden(db, c.settings, driverNow(db, req.driverId, c.now), c.now);
     const here = localParts(c.now, c.settings.timeZone);
-    res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings) });
+    // app: the newest Android app ({ version, url }), so an older app offers the update.
+    res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings), app: appRelease() });
   });
 
   // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).

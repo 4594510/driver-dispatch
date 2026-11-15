@@ -25,6 +25,7 @@ import { localParts } from "./rules.js";
 import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
+import { createAppRelease } from "./appupdate.js";
 import { driverRouter, setPin, driverNow, setDriverStatus, forgetIfHidden, notSharedReason } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
 import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
@@ -111,7 +112,9 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
 
   // --- the driver app ---
   const rideCtx = () => ({ db, travel, settings: getSettings(db, clock()), now: clock(), notify });
-  app.use("/api/driver", driverRouter(db, rideCtx));
+  // The newest driver app on GitHub (looked up only by the real server, not in tests with their own env).
+  const appRelease = deps.appRelease || (env === process.env ? createAppRelease({ repo: env.GITHUB_REPO || undefined }) : () => null);
+  app.use("/api/driver", driverRouter(db, rideCtx, appRelease));
   // Claude's reading of feedback, with FEEDBACK_KEY (feedback.js).
   app.use("/api/feedback", feedbackRouter(db, env));
 
