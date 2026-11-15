@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { greetingPrompt, farewellPrompt } from "../src/phone/greeting.js";
+import { greetingPrompt, farewellPrompts } from "../src/phone/greeting.js";
 
 // Times are New York local (UTC-5 in winter, UTC-4 in summer).
 const at = (iso) => greetingPrompt(new Date(iso));
@@ -24,12 +24,6 @@ test("the greeting goes by the time of day, Shabbos, and the Jewish day (Shloime
   assert.equal(at("2027-09-14T14:00:00Z"), "P72", "Elul (10 AM): a usual greeting");
 });
 
-test("the goodbye wishes a kesiva vachasima tova in Elul and a gmar chasima tova until Yom Kippur", () => {
-  assert.equal(farewellPrompt(new Date("2027-09-14T14:00:00Z")), "P80", "12 Elul");
-  assert.equal(farewellPrompt(new Date("2027-10-05T14:00:00Z")), "P81", "4 Tishrei");
-  assert.equal(farewellPrompt(new Date("2026-11-12T14:00:00Z")), "P41");
-});
-
 test("Chol Hamoed, also Hoshana Rabba and erev the last days of Pesach, greets with a gutn moed (Shloime, 2026-11-15)", () => {
   assert.equal(at("2027-10-15T14:00:00Z"), "P83", "14 Tishri: erev Sukkos");
   assert.equal(at("2027-10-21T14:00:00Z"), "P77", "20 Tishri: Chol Hamoed");
@@ -37,13 +31,22 @@ test("Chol Hamoed, also Hoshana Rabba and erev the last days of Pesach, greets w
   assert.equal(at("2027-04-27T14:00:00Z"), "P77", "20 Nisan: erev the last days, still Chol Hamoed");
 });
 
-test("the goodbye: kesiva vachasima from 15 Av, gmar chasima to Yom Kippur, gmar chosem chaim, a gut kvitel on Hoshana Rabba", () => {
-  const bye = (iso) => farewellPrompt(new Date(iso));
-  assert.equal(bye("2027-08-17T14:00:00Z"), "P41", "14 Av");
-  assert.equal(bye("2027-08-18T14:00:00Z"), "P80", "15 Av");
-  assert.equal(bye("2027-10-11T14:00:00Z"), "P81", "10 Tishri: Yom Kippur");
-  assert.equal(bye("2027-10-12T14:00:00Z"), "P84", "11 Tishri: after Yom Kippur");
-  assert.equal(bye("2027-10-21T14:00:00Z"), "P84", "20 Tishri");
-  assert.equal(bye("2027-10-22T14:00:00Z"), "P85", "21 Tishri: Hoshana Rabba");
-  assert.equal(bye("2027-10-28T14:00:00Z"), "P41", "27 Tishri");
+test("the goodbye: yasher koach, the wish of the day, then the season's (Shloime, 2026-11-15)", () => {
+  const bye = (iso) => farewellPrompts(new Date(iso));
+  assert.deepEqual(bye("2026-11-12T15:00:00Z"), ["P86", "P73"], "Thursday 10 AM: a gutn tog");
+  assert.deepEqual(bye("2026-11-12T23:00:00Z"), ["P86", "P87"], "6 PM: a gute nacht");
+  assert.deepEqual(bye("2026-11-13T15:00:00Z"), ["P86", "P88"], "Friday: a gut Shabbos");
+  assert.deepEqual(bye("2026-11-15T01:00:00Z"), ["P86", "P75"], "motzei Shabbos: a gute voch");
+  assert.deepEqual(bye("2026-11-15T15:00:00Z"), ["P86", "P73"], "Sunday: no gute voch");
+  assert.deepEqual(bye("2027-04-21T14:00:00Z"), ["P86", "P89"], "erev Pesach: a gut yom tov");
+  assert.deepEqual(bye("2027-04-25T14:00:00Z"), ["P86", "P77"], "Chol Hamoed: a gutn moed");
+  assert.deepEqual(bye("2027-04-27T14:00:00Z"), ["P86", "P89"], "20 Nisan: erev the last days");
+  assert.deepEqual(bye("2026-12-07T15:00:00Z"), ["P86", "P78"], "Chanukah");
+  assert.deepEqual(bye("2027-08-17T14:00:00Z"), ["P86", "P73"], "14 Av: nothing for the season yet");
+  assert.deepEqual(bye("2027-08-18T14:00:00Z"), ["P86", "P73", "P80", "P90"], "15 Av: kesiva vachasima, a gut gebentsht yor");
+  assert.deepEqual(bye("2027-10-01T14:00:00Z"), ["P86", "P89", "P80", "P90"], "29 Elul, erev Rosh Hashana");
+  assert.deepEqual(bye("2027-10-11T14:00:00Z"), ["P86", "P73", "P81"], "10 Tishri: gmar chasima tova");
+  assert.deepEqual(bye("2027-10-12T14:00:00Z"), ["P86", "P73", "P84"], "11 Tishri: gmar chosem chaim");
+  assert.deepEqual(bye("2027-10-22T14:00:00Z"), ["P86", "P89", "P85"], "Hoshana Rabba (a Friday): a gut yom tov, a gut kvitel");
+  assert.deepEqual(bye("2027-10-28T14:00:00Z"), ["P86", "P73"], "27 Tishri");
 });

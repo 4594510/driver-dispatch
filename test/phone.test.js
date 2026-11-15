@@ -1,4 +1,5 @@
 import test from "node:test";
+import { farewellPrompts } from "../src/phone/greeting.js";
 import assert from "node:assert/strict";
 import { openDb } from "../src/db.js";
 import { phoneStep } from "../src/phone/ivr.js";
@@ -13,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 
 const now = new Date("2026-11-11T15:00:00Z"); // 10:00 AM New York
+const BYE = farewellPrompts(now, "America/New_York");
 const settings = { ...DEFAULT_SETTINGS, stopMinutes: 0 };
 const travel = {
   geocode: async () => null,
@@ -75,7 +77,7 @@ test("booking a ride by phone the short way: from, to, when, and it's read back"
   assert.deepEqual(prompts(r[6]), ["P19", "P20"], "no ride-back question: straight to the read-back");
   assert.deepEqual(said(r[6]), ["משה", "פון", "שטוב", "קיין", "שול", "אום", "צוועלף", "נאכמיטאג"]);
   const done = r[7];
-  assert.deepEqual(prompts(done), ["P21", "P41"]);
+  assert.deepEqual(prompts(done), ["P21", ...BYE]);
   assert.equal(done.hangup, true);
   const b = db.prepare("SELECT * FROM bookings").get();
   assert.equal(b.passenger_id, "ps1");
@@ -103,7 +105,7 @@ test("change something at the read-back: someone else, how many people, a ride b
   assert.deepEqual(prompts(r[13]), ["P19", "P20"]);
   assert.deepEqual(prompts(r[15]), ["P16"]);
   assert.ok(said(r[16]).includes("צוריק"), "the ride back is read back");
-  assert.deepEqual(prompts(r[17]), ["P21", "P41"]);
+  assert.deepEqual(prompts(r[17]), ["P21", ...BYE]);
   const [b, back] = db.prepare("SELECT * FROM bookings ORDER BY pickup_minute").all();
   assert.equal(b.passenger_id, "ps2");
   assert.equal(b.women, 2);
@@ -141,7 +143,7 @@ test("more people: just how many men and women in all, no 'together' question; a
   const offer = r[r.length - 1];
   assert.deepEqual(prompts(offer), ["P23", "P27", "P27b"]);
   const take = await phoneStep(ctx(db), { call_id: "b", from: "8455550001", step: offer.gather.step, keys: "1" });
-  assert.deepEqual(prompts(take), ["P21", "P41"]);
+  assert.deepEqual(prompts(take), ["P21", ...BYE]);
   assert.equal(db.prepare("SELECT count(*) AS n FROM bookings").get().n, 2);
 });
 
@@ -150,7 +152,7 @@ test("wrong keys are asked again, and twice wrong says goodbye", async () => {
   const r = await call(db, ["8", "", "8"]);
   assert.deepEqual(prompts(r[1]), ["P42", "P04"]);
   assert.deepEqual(prompts(r[2]), ["P43", "P04"]);
-  assert.deepEqual(prompts(r[3]), ["P41"]);
+  assert.deepEqual(prompts(r[3]), [...BYE]);
   assert.equal(r[3].hangup, true);
 });
 
@@ -174,7 +176,7 @@ test("the pickup place can be changed by phone only more than 30 minutes ahead",
   assert.deepEqual(prompts(r[3]), ["P46", "P04"]);
   assert.equal(db.prepare("SELECT pickup_place_id FROM bookings").get().pickup_place_id, "store");
   const late = await call(db, ["2", "2"], { id: "c", extra: { now: new Date("2026-11-11T16:45:00Z") } });
-  assert.deepEqual(prompts(late[2]), ["P36", "P41"]);
+  assert.deepEqual(prompts(late[2]), ["P36", ...BYE]);
 });
 
 test("a place with a 3-digit code is picked by phone", async () => {
@@ -235,7 +237,7 @@ test("outgoing calls: the reminder takes 1 or 2, a time change is agreed by phon
   assert.deepEqual(prompts(first), ["P37a", "P37b"]);
   assert.ok(said(first).includes("משה"));
   const yes = await phoneStep(ctx(db), { call_id: "o1", from: "+18455550001", step: first.gather.step, keys: "1" });
-  assert.deepEqual(prompts(yes), ["P30a", "P41"]);
+  assert.deepEqual(prompts(yes), ["P30a", ...BYE]);
   assert.equal(getBooking(db, b.id).confirmed_by_passenger, 1);
 
   // A second ride: the driver offers 12:30 instead of 12:00 and the caller agrees.
@@ -247,7 +249,7 @@ test("outgoing calls: the reminder takes 1 or 2, a time change is agreed by phon
   const ask = await phoneStep(ctx(db), { call_id: "o2", from: "+18455550001", step: `out:${tc.id}`, keys: "" });
   assert.deepEqual(prompts(ask), ["P38a", "P38b"]);
   const agree = await phoneStep(ctx(db), { call_id: "o2", from: "+18455550001", step: ask.gather.step, keys: "1" });
-  assert.deepEqual(prompts(agree), ["P39", "P31", "P41"]);
+  assert.deepEqual(prompts(agree), ["P39", "P31", ...BYE]);
   const after = getBooking(db, p.id);
   assert.equal(after.status, "accepted");
   assert.equal(after.pickup_minute, 810);
@@ -288,7 +290,7 @@ test("with the driver offline, the caller hears the ride waits unconfirmed", asy
   const db = setup();
   db.prepare("UPDATE drivers SET status = 'offline'").run();
   const r = await call(db, ["1", "1", "0", "20", "2", "1200", "1"]);
-  assert.deepEqual(prompts(r[r.length - 1]), ["P22", "P41"]);
+  assert.deepEqual(prompts(r[r.length - 1]), ["P22", ...BYE]);
 });
 
 test("a caller is known by a family's phone or one person's phone; a family's phone says how many men and women", async () => {
@@ -383,7 +385,7 @@ test("a one-time address: key 3, said out loud, found on the map, read back in E
   for (const keys of ["20", "2", "1200"]) last = await step(last.gather.step, { keys });
   assert.ok(said(last).includes("12 Main Street, Monsey"), "the read-back says the address");
   const done = await step(last.gather.step, { keys: "1" });
-  assert.deepEqual(prompts(done), ["P21", "P41"]);
+  assert.deepEqual(prompts(done), ["P21", ...BYE]);
   const b = db.prepare("SELECT * FROM bookings").get();
   assert.equal(b.pickup_place_id, null);
   assert.equal(b.pickup_address, "12 Main St, Monsey, NY 10952, USA");
@@ -414,7 +416,7 @@ test("more people booked from someone's own phone without them: the ride isn't i
   assert.equal(b.women, 2);
   // More than 7 is too many for the van.
   const r = await call(db, ["1", "2", "4", "4"], { id: "big" });
-  assert.deepEqual(prompts(r.at(-1)), ["P23", "P41"]);
+  assert.deepEqual(prompts(r.at(-1)), ["P23", ...BYE]);
 });
 
 test("a new address said on the phone can be kept for everyone: its code is the house number", async () => {
@@ -636,10 +638,10 @@ test("a message whose ride changed before it went out is not sent; one cut off b
   assert.equal(db.prepare("SELECT status FROM deliveries WHERE kind = 'announcement'").get().status, "sent");
 });
 
-test("in Elul the goodbye wishes a kesiva vachasima tova (Shloime, 2026-11-13)", async () => {
+test("every goodbye: yasher koach, the wish of the day, and in Elul a kesiva vachasima tova (Shloime, 2026-11-15)", async () => {
   const db = setup();
   const r = await call(db, ["8", "", "8"], { extra: { now: new Date("2027-09-14T15:00:00Z") } });
-  assert.deepEqual(prompts(r[3]), ["P80"]);
+  assert.deepEqual(prompts(r[3]), ["P86", "P73", "P80", "P90"]);
   assert.equal(r[3].hangup, true);
 });
 

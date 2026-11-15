@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P85, some unused) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P90, some unused) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -95,13 +95,19 @@ export const PROMPTS = {
   P77: "א גוטן מועד.",
   P78: "א לעכטיגן חנוכה.",
   P79: "א פרייליכן פורים.",
-  P80: "יישר כח, א כתיבה וחתימה טובה.",
-  P81: "יישר כח, א גמר חתימה טובה.",
+  P80: "א כתיבה וחתימה טובה.",
+  P81: "א גמר חתימה טובה.",
   P82: "א גוטן ערב שבת.",
   P83: "א גוטן ערב יום טוב.",
-  // Goodbye after Yom Kippur, and on Hoshana Rabba (Shloime, 2026-11-15).
-  P84: "יישר כח, גמר חותם חיים.",
-  P85: "יישר כח, א גוט קוויטל.",
+  // The goodbye in pieces (Shloime, 2026-11-15): P86, the wish of the day (P73, P75-P79, P87-P89), the season's
+  // (P80+P90, P81, P84, P85). P41 is kept for tests and as the plain goodbye.
+  P84: "גמר חותם חיים.",
+  P85: "א גוט קוויטל.",
+  P86: "יישר כח.",
+  P87: "א גוטע נאכט.",
+  P88: "א גוט שבת.",
+  P89: "א גוט יום טוב.",
+  P90: "א גוט געבענטשט יאר.",
 };
 
 // Small words between pieces, recorded once like the numbers.
