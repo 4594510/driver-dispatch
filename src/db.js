@@ -211,6 +211,10 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
     riders: "TEXT", // JSON [passenger ids] of the people named on the ride; men and women count them too
     // The driver took the ride although the seat rules didn't fit: while it is on the route, seats are only counted.
     seat_override: "INTEGER NOT NULL DEFAULT 0",
+    // The driver app shows asked, accepted and ETA (driver feedback, 2026-11-16): the time first asked for (kept when
+    // the caller agrees to another time) and the pickup time the caller was last told (accepted, or a later notice).
+    asked_minute: "INTEGER",
+    told_minute: "INTEGER",
   });
   // The driver app (stage 5).
   addColumns(db, "drivers", { pin_hash: "TEXT" }); // the app's sign-in: the driver's phone and a PIN set by an admin

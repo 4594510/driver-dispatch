@@ -608,6 +608,8 @@ test("a time the driver offered is answered by calling in: 1 agrees, 2 cancels, 
   const after = getBooking(db, p.id);
   assert.equal(after.status, "accepted");
   assert.equal(after.pickup_minute, 810);
+  assert.equal(after.asked_minute, 780, "the time first asked for is kept, for the driver app");
+  assert.equal(after.told_minute, after.eta_minute, "the accepted time");
   assert.equal(after.driver_id, "drv1");
   // The call that was still waiting to ask is not made any more.
   assert.equal(db.prepare("SELECT count(*) n FROM deliveries WHERE kind = 'time_change' AND status = 'queued'").get().n, 0);

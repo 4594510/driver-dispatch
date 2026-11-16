@@ -27,6 +27,10 @@ const ERRORS = {
   no_seats: "The seats don't work for this.", wrong_status: "Not possible now (the ride changed).", bad_time: "Choose a time within service hours.",
   dropoff_before_pickup: "A drop-off can't come before its pickup.", route_changed: "The route changed meanwhile. Look again.",
   bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", past_time: "That time already passed. Choose a later one.",
+  not_registered: "Choose who the ride is for.", no_riders: "Choose how many men and women (or a package).", no_pickup: "Choose where from.",
+  no_dropoff: "Choose where to.", outside_hours: "That time is outside today's hours.", closed: "There are no rides today.",
+  in_past: "That time already passed.", driver_break: "That time is inside one of your breaks.", too_far: "That trip is longer than 30 minutes.",
+  full: "The van is full then.", no_seating: "The seats don't work for this.",
 };
 const errText = (data) => (data?.errors || []).map((e) => ERRORS[e] || e).join(" ") || data?.error || "Something went wrong.";
 
@@ -36,6 +40,20 @@ function toast(msg, ms = 3000) {
   t.hidden = false;
   clearTimeout(toast.t);
   toast.t = setTimeout(() => (t.hidden = true), ms);
+}
+
+// Questions and notices on the page itself. The Android app shows no confirm() or alert() boxes: confirm() answers
+// "no" there by itself, so "Can't", "Stop work" and the other asked buttons did nothing (driver feedback, 2026-11-16).
+let askDone = null;
+function ask(text, yes = "Yes", danger = false) {
+  return new Promise((resolve) => {
+    if (askDone) askDone(false);
+    sheet(`<h2>${esc(text)}</h2><div class="actions"><button class="ghost big" data-ask="no">No</button><button class="${danger ? "bad" : "good"} big" data-ask="yes">${esc(yes)}</button></div>`);
+    askDone = resolve;
+  });
+}
+function info(text) {
+  sheet(`<p>${esc(text).replace(/\n/g, "<br>")}</p><button class="ghost big" data-close>OK</button>`);
 }
 
 const minuteText = (m) => {
@@ -281,10 +299,10 @@ const prioBadge = (x) => (x?.priority > 0 ? ` <span class="prio p${x.priority}">
 // A stop: what to do, when, who and where. The next stop is big, with one big button for what comes next.
 function stopCard(s, big) {
   const pickup = s.kind === "pickup";
-  const late = pickup && s.window && s.arrive > s.window[1];
   return `<div class="card ${big ? "next" : ""}">
-    <div class="kind ${s.kind} ${big ? "huge" : ""}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}${late ? ' <span class="late">late</span>' : ""}</div>
+    <div class="kind ${s.kind} ${big ? "huge" : ""}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}</div>
     <h2>${esc(s.rider_name || "Ride")}${prioBadge(s)}</h2>
+    ${pickup ? timesLine(s, s.arrive) : ""}
     <div class="addr">${esc(s.address)}</div>
     <div class="quiet">${people(s)}${s.together ? " · may sit together" : ""}</div>
     ${big && s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
@@ -300,14 +318,31 @@ function stopCard(s, big) {
   </div>`;
 }
 
+// Asked, accepted (the pickup time the caller was told), the ETA, and on time or late (driver feedback, 2026-11-16).
+// Late is counted from the accepted time (or the end of the asked window when nothing was told yet).
+function timesLine(x, eta) {
+  const parts = [];
+  if (x.asked != null) parts.push(`Asked <b>${minuteText(x.asked)}</b>`);
+  if (x.told != null) parts.push(`Accepted <b>${minuteText(x.told)}</b>`);
+  if (eta != null) parts.push(`ETA <b>${minuteText(eta)}</b>`);
+  const promised = x.told ?? x.window?.[1];
+  let state = "";
+  if (eta != null && promised != null) {
+    const late = Math.round(eta - promised);
+    state = late > 0 ? ` <span class="tag no">${late} min late</span>` : ' <span class="tag taken">On time</span>';
+  }
+  return parts.length ? `<div class="times">${parts.join(" · ")}${state}</div>` : "";
+}
+
 // A new ride request: who, from where to where, when; "Take it" or "Can't".
 function requestCard(r) {
   const proposed = r.status === "proposed";
-  return `<div class="card request ${proposed ? "offered" : ""}">
+  return `<div class="card request ${proposed ? "offered" : "waiting"}">
     <div>${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}</div>
     <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     <div class="addr">${esc(r.from)} → ${esc(r.to)}</div>
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
+    ${proposed ? `<div class="times">They asked for <b>${minuteText(r.asked ?? r.window[0])}</b></div>` : r.asked != null && r.asked !== r.window[0] ? `<div class="times">First asked for <b>${minuteText(r.asked)}</b></div>` : ""}
     ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
     <div class="actions">
       <button class="bad big" data-act="reject" data-id="${r.id}">Can't</button>
@@ -345,7 +380,8 @@ function routePane() {
 function stopRow(s) {
   return `<div class="stop"><div class="time">${minuteText(s.arrive)}</div>
     <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-      <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div></div></div>`;
+      <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div>
+      ${s.kind === "pickup" ? timesLine(s, s.arrive) : ""}</div></div>`;
 }
 function orderEditor() {
   const stops = reorder;
@@ -369,7 +405,7 @@ function ridesPane() {
   const reqs = today.requests || [];
   const others = today.rides || [];
   const waiting = reqs.filter((r) => r.status === "pending").length;
-  const sub = waiting ? ` <span class="count">${waiting} new</span>` : "";
+  const sub = `${waiting ? ` <span class="count">${waiting} new</span>` : ""}<button class="ghost small" data-add-ride>+ Add a ride</button>`;
   if (!reqs.length && !others.length) return { empty: true, sub, html: '<div class="card"><p class="quiet">No requests yet today. A new one shows here and the phone rings.</p></div>' };
   return {
     sub,
@@ -380,7 +416,8 @@ function rideRow(r) {
   const finished = ["completed", "rejected", "cancelled", "no_show"].includes(r.status);
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(r.window[0])}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
-      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div><div class="quiet">${esc(r.from)} → ${esc(r.to)}</div></div></div>`;
+      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div><div class="quiet">${esc(r.from)} → ${esc(r.to)}</div>
+      ${finished ? "" : timesLine(r, r.status === "accepted" ? r.eta : null)}</div></div>`;
 }
 
 function moreView() {
@@ -391,6 +428,8 @@ function moreView() {
     <button class="ghost big" data-sharing="${d.share_location ? "off" : "on"}">${d.share_location ? "Stop sharing my location" : "Share my location again"}</button>
     <p class="quiet">${d.share_location ? "Your location is shared only while you are at work, inside the service hours." : "Your location is not shared. The office can't see where you are."}</p>
     <button class="ghost big" data-tab-go="hours">My hours, days off and breaks</button>
+    <button class="ghost big" data-add-ride>Add a ride…</button>
+    <button class="ghost big" data-add-place>Add a place (address and code)…</button>
     <button class="ghost big" data-everyone>Send a message to everyone…</button>
     <button class="ghost big" data-feedback>Send a message to the office…</button>
     <button class="ghost big" data-refresh>Load again</button></div>
@@ -415,14 +454,23 @@ async function loadSchedule() {
   } catch { /* no signal */ }
   if (tab === "hours") render();
 }
+// The hours as a calendar, one week at a time (driver feedback, 2026-11-16): tap a day to change it or add a break.
+let week = 0;
 function hoursView() {
   if (!sched) return '<div class="card"><p class="quiet">Loading… (the hours need signal)</p></div>';
   const first = sched.days[0].day;
-  return `<div class="card"><h2>Next two weeks</h2>
-      <p class="quiet">Usually ${minuteText(sched.usual.openMinute)} – ${minuteText(sched.usual.closeMinute)}. Callers hear the changes on the phone.</p>
-      ${sched.days.map((d) => `<div class="stop"><div class="body">${esc(dayText(d.day))}${d.day === first ? " (today)" : ""}</div>
-        <div class="${d.changed ? (d.closed ? "late" : "") : "quiet"}">${d.changed ? `<b>${esc(hoursText(d))}</b>` : esc(hoursText(d))}</div></div>`).join("")}
-      <button class="big" data-sch-add>Change my hours…</button></div>
+  const days = sched.days.slice(week * 7, week * 7 + 7);
+  const breaksOn = (day) => (sched.breaks || []).filter((b) => b.day === day);
+  return `<div class="card"><div class="actions"><button class="${week === 0 ? "on" : "ghost"}" data-week="0">This week</button><button class="${week === 1 ? "on" : "ghost"}" data-week="1">Next week</button></div>
+      <p class="quiet">Usually ${minuteText(sched.usual.openMinute)} – ${minuteText(sched.usual.closeMinute)}. Tap a day to change it. Callers hear the changes on the phone.</p>
+      <div class="week">${days.map((d) => {
+        const brk = breaksOn(d.day);
+        return `<button class="day ${d.closed ? "closed" : d.changed ? "changed" : ""}" data-day="${esc(d.day)}">
+          <span class="dname">${esc(dayText(d.day))}${d.day === first ? " · today" : ""}</span>
+          <span class="dhours">${esc(hoursText(d))}</span>
+          ${brk.length ? `<span class="dbreak">${brk.map((b) => `Break ${esc(minuteText(b.startMinute))} – ${esc(minuteText(b.endMinute))}`).join("<br>")}</span>` : ""}</button>`;
+      }).join("")}</div>
+      <button class="big" data-sch-add>Change several days…</button></div>
     ${sched.changes.length ? `<div class="card"><h2>Changes</h2>${sched.changes.map((c) => `<div class="stop"><div class="body">
       ${esc(c.from === c.to ? dayText(c.from) : `${dayText(c.from)} to ${dayText(c.to)}`)}${c.weekdays ? ` <span class="quiet">(${c.weekdays.map((d) => WD[d]).join(", ")})</span>` : ""}
       <div><b>${esc(hoursText(c))}</b></div>${c.note ? `<div class="quiet">${esc(c.note)}</div>` : ""}</div>
@@ -435,10 +483,22 @@ function hoursView() {
         <button class="bad" data-brk-remove="${esc(b.id)}">Remove</button></div>`).join("") || '<p class="quiet">No breaks planned.</p>'}
       <button class="big" data-brk-add>Add a break…</button></div>`;
 }
-function breakSheet() {
+// One day of the calendar: its hours and breaks, and what can be changed.
+function daySheet(day) {
+  const d = sched.days.find((x) => x.day === day);
+  if (!d) return;
+  const brk = (sched.breaks || []).filter((b) => b.day === day);
+  sheet(`<h2>${esc(dayText(day))}</h2><p><b>${esc(hoursText(d))}</b>${d.changed ? ' <span class="quiet">(changed)</span>' : ""}</p>
+    ${brk.map((b) => `<p>Break ${esc(minuteText(b.startMinute))} – ${esc(minuteText(b.endMinute))}</p>`).join("")}
+    <button class="big" data-day-hours="${esc(day)}">Other hours this day…</button>
+    <button class="bad big" data-day-closed="${esc(day)}">No rides this day…</button>
+    <button class="ghost big" data-brk-add="${esc(day)}">Add a break this day…</button>
+    <button class="ghost big" data-close>Close</button>`);
+}
+function breakSheet(day) {
   const first = sched?.days[0].day || new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   sheet(`<h2>Add a break</h2><form id="brk-form" onsubmit="return false">
-    <label>Day <input type="date" name="day" min="${first}" value="${esc(first)}"></label>
+    <label>Day <input type="date" name="day" min="${first}" value="${esc(day || first)}"></label>
     <label>From <input type="time" name="start" value="13:00"></label><label>Until <input type="time" name="end" value="13:30"></label>
     <label>Note <span class="quiet">(optional)</span> <input name="note" maxlength="200"></label>
     <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-brk-save>Save</button></div></form>
@@ -449,8 +509,8 @@ async function saveBreak() {
   const r = await act("/api/driver/breaks", { day: v.day, startMinute: toMinute(v.start), endMinute: toMinute(v.end), note: v.note }, { queueable: false, ok: "Break saved" });
   if (!r) return;
   closeSheet();
-  if (r.affected?.length) alert(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked in this break (not cancelled).`);
-  loadSchedule();
+  await loadSchedule();
+  if (r.affected?.length) info(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked in this break (not cancelled).`);
 }
 function readSheet() {
   const f = $("#sch-form");
@@ -476,11 +536,11 @@ async function saveSchedule() {
   const r = await act("/api/driver/schedule", body, { queueable: false, ok: "Saved. Callers will hear it." });
   if (!r) return;
   closeSheet();
+  await loadSchedule();
   if (r.affected?.length) {
-    alert(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked outside these hours (not cancelled):\n\n` +
+    info(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked outside these hours (not cancelled):\n\n` +
       r.affected.map((b) => `${dayText(b.day)} ${minuteText(b.pickup_minute)}  ${b.rider_name}  ${b.phone}`).join("\n"));
   }
-  loadSchedule();
 }
 
 // --- sheets (questions over the page) ---
@@ -488,7 +548,12 @@ function sheet(html) {
   $("#sheet-body").innerHTML = html;
   $("#sheet").hidden = false;
 }
-const closeSheet = () => ($("#sheet").hidden = true);
+function closeSheet() {
+  $("#sheet").hidden = true;
+  const f = askDone; // a question closed without an answer is a "no"
+  askDone = null;
+  f?.(false);
+}
 $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet" || e.target.dataset.close != null) closeSheet(); });
 
 async function preview(id) {
@@ -566,7 +631,58 @@ function proposeSheet(id) {
   for (let m = from; times.length < 10 && m <= h.closeMinute; m += 15) if (m !== base && m >= h.openMinute) times.push(m);
   sheet(`<h2>Suggest a time for ${esc(r?.rider_name || "this ride")}</h2><p class="quiet">The caller is asked to agree.</p>
     <div class="chips">${times.map((m) => `<button class="ghost" data-propose-at="${m}" data-id="${id}">${minuteText(m)}</button>`).join("")}</div>
+    <label>Or any time <input type="time" id="propose-time" step="60"></label>
+    <button class="good big" data-propose-typed="${id}">Offer this time</button>
     <button class="ghost big" data-close>Cancel</button>`);
+}
+
+// The driver adds a ride himself (driver feedback, 2026-11-16): who (a phone on the list), how many, from, to, when.
+// It is saved as a request, then taken the usual way (it shows what changes first when needed).
+let bookOptions = null;
+async function addRideSheet() {
+  sheet('<p class="quiet">Loading…</p>');
+  try { const r = await api("/api/driver/book-options"); if (r.ok) bookOptions = r.data; } catch { /* no signal */ }
+  if (!bookOptions) { info("No signal. Adding a ride needs signal."); return; }
+  const placeOpts = `<option value="">Type an address below</option>${bookOptions.places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} · ${esc(p.name)}</option>`).join("")}`;
+  const count = (name) => `<select name="${name}">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option>${n}</option>`).join("")}</select>`;
+  sheet(`<h2>Add a ride</h2><form id="ride-form" onsubmit="return false">
+    <label>For <select name="phone"><option value="">Choose…</option>${bookOptions.phones.map((p) => `<option value="${esc(p.number)}">${esc(p.label)}</option>`).join("")}</select></label>
+    <label>Name or note <span class="quiet">(optional)</span> <input name="riderName" maxlength="80"></label>
+    <div class="actions"><label>Men ${count("men")}</label><label>Women ${count("women")}</label></div>
+    <label class="check"><input type="checkbox" name="package"> Just a package (no riders)</label>
+    <label>From <select name="from">${placeOpts}</select></label><input name="fromAddress" placeholder="Or an address, e.g. 12 Main St, Monsey">
+    <label>To <select name="to">${placeOpts}</select></label><input name="toAddress" placeholder="Or an address, e.g. 12 Main St, Monsey">
+    <label>Pickup time <span class="quiet">(empty = now)</span> <input type="time" name="time" step="60"></label>
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-ride-save>Add and take it</button></div></form>`);
+}
+async function saveRide() {
+  const f = new FormData($("#ride-form"));
+  const end = (sel, typed) => (f.get(sel) ? { placeId: f.get(sel) } : { address: String(f.get(typed) || "").trim() });
+  const body = {
+    phone: f.get("phone"), riderName: f.get("riderName"), package: !!f.get("package"),
+    men: Number(f.get("men")), women: Number(f.get("women")),
+    pickup: end("from", "fromAddress"), dropoff: end("to", "toAddress"), pickupMinute: f.get("time") ? toMinute(f.get("time")) : null,
+  };
+  const r = await act("/api/driver/rides", body, { queueable: false });
+  if (!r?.id) return;
+  closeSheet();
+  await take(r.id);
+}
+
+// The driver adds a saved place with its code (driver feedback, 2026-11-16). Everyone can use it on the phone.
+function addPlaceSheet() {
+  sheet(`<h2>Add a place</h2><form id="place-form" onsubmit="return false">
+    <label>Name <input name="name" maxlength="80" placeholder="e.g. Main St shul"></label>
+    <label>Address <input name="address" maxlength="200" placeholder="e.g. 12 Main St, Monsey"></label>
+    <label>Code <span class="quiet">(1 to 6 digits; empty = the house number)</span> <input name="code" inputmode="numeric" maxlength="6"></label>
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-place-save>Save</button></div></form>
+    <p class="quiet">Callers can then press this code on the phone for "from" or "to".</p>`);
+}
+async function savePlace() {
+  const v = Object.fromEntries(new FormData($("#place-form")));
+  const r = await act("/api/driver/places", { name: v.name, address: v.address, code: v.code }, { queueable: false });
+  if (!r?.ok) return;
+  info(`Saved. The code is ${r.code}.${r.found ? `\nGoogle found: ${r.found}` : ""}${r.warning ? `\n${r.warning}` : ""}`);
 }
 
 function lateSheet() {
@@ -619,33 +735,48 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-tab-go]");
   if (!t) return;
   const ds = t.dataset;
+  if (ds.ask) { const f = askDone; askDone = null; $("#sheet").hidden = true; f?.(ds.ask === "yes"); return; }
+  if (ds.week != null) { week = Number(ds.week); render(); return; }
+  if (ds.day) return daySheet(ds.day);
+  if (ds.dayHours || ds.dayClosed) { schKind = ds.dayHours ? "hours" : "closed"; const d = ds.dayHours || ds.dayClosed; scheduleSheet({ from: d, to: d }); return; }
+  if (ds.addRide != null) return addRideSheet();
+  if (ds.rideSave != null) return saveRide();
+  if (ds.addPlace != null) return addPlaceSheet();
+  if (ds.placeSave != null) return savePlace();
+  if (ds.proposeTyped) {
+    const v = $("#propose-time")?.value;
+    if (!v) { toast("Choose a time first."); return; }
+    closeSheet();
+    await act(`/api/driver/bookings/${ds.proposeTyped}/propose`, { minute: toMinute(v) }, { queueable: false, ok: "Sent to the caller" });
+    return;
+  }
   if (ds.tab || ds.tabGo) { closeSheet(); tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
   if (ds.schAdd != null) return scheduleSheet();
   if (ds.schKind) { schKind = ds.schKind; scheduleSheet(readSheet()); return; }
   if (ds.schSave != null) return saveSchedule();
-  if (ds.brkAdd != null) return breakSheet();
+  if (ds.brkAdd != null) return breakSheet(ds.brkAdd);
   if (ds.brkSave != null) return saveBreak();
   if (ds.brkRemove) {
-    if (!confirm("Remove this break?")) return;
+    if (!(await ask("Remove this break?", "Remove", true))) return;
     const r = await act(`/api/driver/breaks/${ds.brkRemove}/remove`, {}, { queueable: false, ok: "Removed" });
     if (r) loadSchedule();
     return;
   }
   if (ds.schRemove) {
-    if (!confirm("Remove this change? Those days go back to the usual hours.")) return;
+    if (!(await ask("Remove this change? Those days go back to the usual hours.", "Remove", true))) return;
     const r = await act(`/api/driver/schedule/${ds.schRemove}/remove`, {}, { queueable: false, ok: "Removed" });
     if (r) loadSchedule();
     return;
   }
   if (ds.status) {
     if (ds.status === "paused") return pauseSheet();
-    if (ds.status === "offline" && !confirm("Stop work? New rides will wait until you start again.")) return;
+    if (ds.status === "offline" && !(await ask("Stop work? New rides will wait until you start again.", "Stop work", true))) return;
     await act("/api/driver/status", { status: ds.status }, { ok: ds.status === "online" ? "Started. Rides will come in" : "Stopped" });
     return;
   }
   if (ds.sharing) {
     const on = ds.sharing === "on";
-    if (!on && !confirm("Stop sharing your location? The office won't see where you are, and late notices are less exact.")) return;
+    if (!on && !(await ask("Stop sharing your location? The office won't see where you are, and late notices are less exact.", "Stop sharing", true))) return;
     await act("/api/driver/sharing", { on }, { ok: on ? "Location shared again" : "Location not shared" });
     return;
   }
@@ -653,8 +784,8 @@ document.addEventListener("click", async (e) => {
   if (ds.act) {
     const id = ds.id;
     const names = { pickup: "Picked up", done: "Dropped off", no_show: "No-show", accept: "Taken", reject: "The caller is told" };
-    if (ds.act === "no_show" && !confirm("Nobody came? The seats are freed.")) return;
-    if (ds.act === "reject" && !confirm("Can't take this ride? The caller gets a message.")) return;
+    if (ds.act === "no_show" && !(await ask("Nobody came? The seats are freed.", "No-show", true))) return;
+    if (ds.act === "reject" && !(await ask("Can't take this ride? The caller gets a message.", "Can't take it", true))) return;
     closeSheet();
     const queueable = ["pickup", "done", "no_show"].includes(ds.act);
     if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
@@ -671,8 +802,7 @@ document.addEventListener("click", async (e) => {
   if (ds.everyoneSend != null) {
     const text = $("#ev-text").value.trim();
     if (!text) { toast("Write the message first."); return; }
-    if (!confirm("Send this to everyone?")) return;
-    closeSheet();
+    if (!(await ask("Send this to everyone?", "Send"))) return;
     const r = await act("/api/driver/announce", { text }, { queueable: false });
     if (r) toast(`Sent to ${r.phones} phones`);
     return;
@@ -706,7 +836,7 @@ document.addEventListener("click", async (e) => {
   if (ds.update != null) { const app = newerApp(); if (app) native.update(app.url); return; }
   if (ds.refresh != null) { await load(); toast("Loaded"); return; }
   if (ds.signout != null) {
-    if (!confirm("Sign out?")) return;
+    if (!(await ask("Sign out?", "Sign out", true))) return;
     try { await api("/api/driver/logout", { method: "POST", body: {} }); } catch { /* fine */ }
     signOut(false);
   }

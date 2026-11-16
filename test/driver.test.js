@@ -325,3 +325,61 @@ test("a time that already passed can't be offered to the caller", async () => {
     assert.equal(ahead.body.booking.status, "proposed");
   });
 });
+
+test("driver feedback 2026-11-16: the driver adds a place and a ride; rides show asked, accepted and ETA; any time can be offered", async () => {
+  await withDay(async ({ call, db, setToken }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
+
+    // A place with its code, the same as the dashboard's (empty code = the house number).
+    const place = await call("/api/driver/places", "POST", { name: "Sample", address: "5 Sample Rd", code: "", key: "p1" });
+    assert.equal(place.status, 200, JSON.stringify(place.body));
+    assert.equal(place.body.code, "5");
+    assert.equal((await call("/api/driver/places", "POST", { name: "", address: "x", key: "p2" })).body.error, "Name and address are needed.");
+
+    const opts = (await call("/api/driver/book-options")).body;
+    assert.deepEqual(opts.phones.map((p) => p.number), ["+18455550001"]);
+    assert.match(opts.phones[0].label, /Family A \.\.0001/);
+    assert.ok(opts.places.some((p) => p.code === "5"));
+
+    // A ride the driver adds: saved as a request (no "booked" text), then taken the usual way.
+    const added = await call("/api/driver/rides", "POST", { phone: "+18455550001", men: 1, women: 0, pickup: { address: "1 Example Ln" }, dropoff: { placeId: place.body.id }, pickupMinute: 720, key: "r1" });
+    assert.equal(added.status, 200, JSON.stringify(added.body));
+    assert.equal(texts(db, "booked").length, 0);
+    assert.equal((await call("/api/driver/rides", "POST", { phone: "", men: 1, pickup: { address: "1 Example Ln" }, dropoff: { address: "5 Sample Rd" }, key: "r2" })).body.errors[0], "not_registered");
+    let today = (await call("/api/driver/today")).body;
+    assert.equal(today.requests[0].id, added.body.id);
+    assert.equal(today.requests[0].asked, 720);
+    assert.equal(today.requests[0].rider_name, "Family A", "no name typed: the phone's family");
+    assert.equal((await call(`/api/driver/bookings/${added.body.id}/accept`, "POST", { key: "a1" })).status, 200);
+
+    today = (await call("/api/driver/today")).body;
+    const stop = today.route.stops.find((s) => s.kind === "pickup");
+    assert.equal(stop.asked, 720);
+    assert.equal(stop.told, db.prepare("SELECT eta_minute FROM bookings WHERE id = ?").get(added.body.id).eta_minute, "accepted = the time the caller was told");
+    assert.equal(today.rides[0].told, stop.told);
+    assert.equal(today.rides[0].eta, stop.arrive);
+
+    // Running late: the caller hears the new time, and that is the accepted time now.
+    await call("/api/driver/late", "POST", { minutes: 30, key: "l1" });
+    today = (await call("/api/driver/today")).body;
+    assert.equal(today.rides[0].told, stop.told + 30);
+
+    // Any time can be offered, not only the suggested ones; the request still shows what was asked.
+    const other = (await call("/api/admin/bookings", "POST", ride({ riderName: "Other", pickupMinute: 780 }))).body.bookings[0].id;
+    assert.equal((await call(`/api/driver/bookings/${other}/propose`, "POST", { minute: 797, key: "o1" })).status, 200);
+    const req = (await call("/api/driver/today")).body.requests.find((r) => r.id === other);
+    assert.deepEqual([req.proposed_minute, req.asked], [797, 780]);
+  });
+});
+
+test("the driver's requests are in time order: 8:40 above 8:50 (driver feedback, 2026-11-16)", async () => {
+  await withDay(async ({ call, setToken }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/admin/bookings", "POST", ride({ riderName: "Later", pickupMinute: 770 }));
+    await call("/api/admin/bookings", "POST", ride({ riderName: "Earlier", pickupMinute: 760 }));
+    assert.deepEqual((await call("/api/driver/today")).body.requests.map((r) => r.rider_name), ["Earlier", "Later"]);
+  });
+});

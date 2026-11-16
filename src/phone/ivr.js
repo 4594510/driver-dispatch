@@ -910,7 +910,7 @@ const timeQuestion = (c, b, newMinute, oldMinute) =>
 const timeAnswered = (c, b) => c.db.prepare("UPDATE deliveries SET status = 'answered', note = 'answered on another call', updated_at = ? WHERE booking_id = ? AND kind = 'time_change' AND status = 'queued'").run(nowIso(), b.id);
 // The caller agrees: the ride moves to the new time and goes on the route. Returns what to say.
 async function agreeTime(c, b, newMinute) {
-  c.db.prepare("UPDATE bookings SET pickup_minute = ?, updated_at = ? WHERE id = ?").run(newMinute, nowIso(), b.id);
+  c.db.prepare("UPDATE bookings SET asked_minute = coalesce(asked_minute, pickup_minute), pickup_minute = ?, updated_at = ? WHERE id = ?").run(newMinute, nowIso(), b.id);
   audit(c.db, `phone:${c.from}`, "agreed_time", b.id, { minute: newMinute });
   timeAnswered(c, b);
   const driverId = b.driver_id || c.db.prepare("SELECT id FROM drivers ORDER BY rowid LIMIT 1").get()?.id;

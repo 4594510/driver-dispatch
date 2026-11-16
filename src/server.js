@@ -124,7 +124,11 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   const rideCtx = () => ({ db, travel, settings: getSettings(db, clock()), now: clock(), notify });
   // The newest driver app on GitHub (looked up only by the real server, not in tests with their own env).
   const appRelease = deps.appRelease || (env === process.env ? createAppRelease({ repo: env.GITHUB_REPO || undefined }) : () => null);
-  app.use("/api/driver", driverRouter(db, rideCtx, appRelease));
+  // The rides and places the driver adds get the dashboard's address checks (defined below; called only per request).
+  app.use("/api/driver", driverRouter(db, rideCtx, appRelease, {
+    checkAddress: (address) => checkAddress(address),
+    addPlace: (body, actor) => addPlace(body, actor),
+  }));
   // Claude's reading of feedback, with FEEDBACK_KEY (feedback.js).
   app.use("/api/feedback", feedbackRouter(db, env));
 
@@ -333,24 +337,30 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
       : !r.exact ? `Google only found ${r.formatted}. Add the house number so the driver finds the right door.` : null;
     return { point: { lat: r.lat, lng: r.lng }, found: r.formatted, warning };
   };
-  admin.post("/places", async (req, res) => {
-    const householdId = req.body.householdId || null;
-    const kind = req.body.kind || "other";
-    const code = String(req.body.code ?? "").trim();
-    const name = String(req.body.name || "").trim();
-    const address = String(req.body.address || "").trim();
-    if (!name || !address) return bad(res, "Name and address are needed.");
-    if (!["home", "work", "other"].includes(kind)) return bad(res, "Kind must be home, work or other.");
-    if (householdId && !db.prepare("SELECT 1 FROM households WHERE id = ?").get(householdId)) return bad(res, "That family isn't there any more.");
+  // Add a saved place (dashboard Places, and the driver app). Returns { ok, id, code, found, warning } or { ok: false, error }.
+  const addPlace = async (body, actor) => {
+    const householdId = body.householdId || null;
+    const kind = body.kind || "other";
+    const code = String(body.code ?? "").trim();
+    const name = String(body.name || "").trim();
+    const address = String(body.address || "").trim();
+    if (!name || !address) return { ok: false, error: "Name and address are needed." };
+    if (!["home", "work", "other"].includes(kind)) return { ok: false, error: "Kind must be home, work or other." };
+    if (householdId && !db.prepare("SELECT 1 FROM households WHERE id = ?").get(householdId)) return { ok: false, error: "That family isn't there any more." };
     // The code is what callers press on the phone (places.js): empty = the house number, else the next free one.
     const check = await checkAddress(address);
-    if (check.error) return bad(res, check.error);
-    const r = savePlace(db, { householdId, code, kind, name, address, spoken: String(req.body.spoken || "").trim() || null,
-      lat: check.point?.lat, lng: check.point?.lng }, req.actor);
-    if (!r.ok) return bad(res, r.error);
+    if (check.error) return { ok: false, error: check.error };
+    const r = savePlace(db, { householdId, code, kind, name, address, spoken: String(body.spoken || "").trim() || null,
+      lat: check.point?.lat, lng: check.point?.lng }, actor);
+    if (!r.ok) return { ok: false, error: r.error };
     // A code another place also has is fine: callers pressing it hear both names and choose (their own family's first).
     const shared = r.sharedWith?.length ? `Code ${r.code} is also used by ${r.sharedWith.join(", ")}. Callers pressing it hear the names and choose; a family's own place comes first for that family.` : null;
-    res.json({ ok: true, id: r.id, code: r.code, found: check.found || null, warning: [check.warning, shared].filter(Boolean).join(" ") || null });
+    return { ok: true, id: r.id, code: r.code, found: check.found || null, warning: [check.warning, shared].filter(Boolean).join(" ") || null };
+  };
+  admin.post("/places", async (req, res) => {
+    const r = await addPlace(req.body, req.actor);
+    if (!r.ok) return bad(res, r.error);
+    res.json(r);
   });
   admin.patch("/places/:id", async (req, res) => {
     const p = db.prepare("SELECT * FROM places WHERE id = ?").get(req.params.id);

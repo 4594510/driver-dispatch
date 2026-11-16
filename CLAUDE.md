@@ -84,6 +84,13 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   stops in order, "Change the order") and the requests (new ones with "Take it" / "Can't", then every ride of the day
   with its status: taken, on board, done, declined, cancelled, no-show; /today's rides), each half scrolling on its
   own, one above the other on a phone, side by side on a wide or sideways screen.
+- Driver feedback (2026-11-16): requests in time order (earliest on top; priority only breaks a tie, still marked);
+  colors green taken, yellow new, blue waiting for the caller; each ride shows Asked (bookings.asked_minute, kept when the
+  caller agrees to another time), Accepted (told_minute: the time the caller was last told) and the ETA, with On time or
+  N min late (against Accepted). The driver may offer any time, add a ride (Requests "+ Add a ride": a listed phone,
+  saved place or address, time; then taken the usual way) and add a place with its code (More). My hours is a week
+  calendar: tap a day for other hours, no rides or a break. The app never uses confirm()/alert(): Android's WebView
+  shows none (confirm answered "no", so "Can't" and "Stop work" did nothing); questions are in-page sheets (ask()).
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
@@ -135,7 +142,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - src/schedule.js: schedule changes (other hours or no rides for a day or range, optionally some weekdays; newest
   wins), set by the driver app (More, My hours) and the dashboard (Schedule tab); callers hear them (menu key 4, P48-P53).
 - src/priority.js: priority levels (Normal, High, Top) an admin sets for a family or one person, always or for a
-  local time range. Used by dispatch.js: the driver's requests are sorted by it, the accept preview warns when a ride
+  local time range. Used by dispatch.js: the driver's requests at the same time are sorted by it, the accept preview warns when a ride
   would leave no room for a waiting higher-priority one, and the planner weighs higher-priority waiting more. It never
   moves an accepted ride later.
 - src/reports.js, src/announcements.js: reports (wait, on time and ride length from the driver's marks; driving time
