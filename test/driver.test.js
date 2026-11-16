@@ -383,3 +383,32 @@ test("the driver's requests are in time order: 8:40 above 8:50 (driver feedback,
     assert.deepEqual((await call("/api/driver/today")).body.requests.map((r) => r.rider_name), ["Earlier", "Later"]);
   });
 });
+
+test("driver feedback 2026-11-16: who called, the drop-off time on board, done or remove any ride, the page version", async () => {
+  await withDay(async ({ call, db, setToken }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
+    const a = (await call("/api/admin/bookings", "POST", ride({ riderName: "A" }))).body.bookings[0].id;
+    const b = (await call("/api/admin/bookings", "POST", ride({ riderName: "B", pickupMinute: 750 }))).body.bookings[0].id;
+    let today = (await call("/api/driver/today")).body;
+    assert.match(today.web, /^[0-9a-f]{12}$/, "the app page's version, so an old open page reloads");
+    assert.equal(today.requests[0].caller, "Family A · 845-555-0001");
+    for (const id of [a, b]) assert.equal((await call(`/api/driver/bookings/${id}/accept`, "POST", { key: `a-${id}` })).status, 200);
+
+    // On board: the ride shows when the drop-off is.
+    await call(`/api/driver/bookings/${a}/pickup`, "POST", { key: "p1" });
+    today = (await call("/api/driver/today")).body;
+    const onBoard = today.rides.find((r) => r.id === a);
+    assert.equal(onBoard.status, "picked_up");
+    assert.equal(onBoard.dropoff_eta, today.route.stops.find((s) => s.booking_id === a && s.kind === "dropoff").arrive);
+    assert.equal(today.route.stops[0].caller, "Family A · 845-555-0001");
+
+    // The driver removes a ride he took: the caller is told it's cancelled.
+    assert.equal((await call(`/api/driver/bookings/${b}/cancel`, "POST", { key: "c1" })).status, 200);
+    assert.equal(db.prepare("SELECT status FROM bookings WHERE id = ?").get(b).status, "cancelled");
+    assert.equal(texts(db, "cancelled").length, 1);
+    today = (await call("/api/driver/today")).body;
+    assert.ok(!today.route.stops.some((s) => s.booking_id === b), "gone from the route");
+  });
+});

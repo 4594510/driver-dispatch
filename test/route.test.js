@@ -113,3 +113,13 @@ test("two requests for the same time: the new one goes after the rider already p
   // b gets the real time: the driver has to come from a's pickup first.
   assert.equal(e.b.pickup, 603);
 });
+
+test("two rides from the same place at the same time are picked up together when the seats allow (driver feedback, 2026-11-16)", () => {
+  for (const [a, b] of [[{}, {}], [{}, { men: 0, women: 1 }], [{ men: 1, women: 1 }, { men: 1, women: 1 }], [{ men: 0, women: 3 }, { men: 1, women: 2 }]]) {
+    const first = ride("a", 0, 20, 600, a);
+    const built = buildRoute([first], ctx);
+    const res = insertRide(built.stops, [first], ride("b", 0, 25, 600, b), ctx);
+    assert.ok(res.ok, JSON.stringify([a, b]));
+    assert.deepEqual(res.stops.slice(0, 2).map((s) => s.kind), ["pickup", "pickup"], "both picked up before any drop-off");
+  }
+});

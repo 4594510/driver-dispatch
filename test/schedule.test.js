@@ -128,10 +128,12 @@ test("phone: other hours today are said at the start; a time outside them is ref
   add(db, { from: "2026-11-11", openMinute: 600, closeMinute: 840 });
   // 1 order (his own phone), 0 from home, 20 to the shul, 2 later, 0330 (past 2 PM)
   const r = await call(db, ["1", "1", "0", "20", "2", "0330"]);
-  assert.deepEqual(prompts(r[0]), ["P76", "P48", "P04"]);
-  assert.deepEqual(said(r[0]), ["צען", "אינדערפרי", "ביז", "צוויי", "נאכמיטאג"]);
+  // The rides already started today: only "until" is said (driver feedback, 2026-11-16).
+  assert.deepEqual(prompts(r[0]), ["P76", "P04"]);
+  assert.deepEqual(said(r[0]), ["היינט זענען דא ריידס ביז", "צוויי", "נאכמיטאג"]);
   const refused = r[r.length - 1];
-  assert.deepEqual(prompts(refused), ["P48", "P16"]);
+  assert.deepEqual(prompts(refused), ["P16"]);
+  assert.deepEqual(said(refused).slice(0, 1), ["היינט זענען דא ריידס ביז"]);
   assert.equal(refused.gather.step, "time");
 });
 
@@ -141,9 +143,9 @@ test("phone: on a usual day the greeting is unchanged, and key 4 reads the hours
   add(db, { from: "2026-11-16", to: "2026-11-17", openMinute: 720, closeMinute: 1080 });
   const r = await call(db, ["4"]);
   assert.deepEqual(prompts(r[0]), ["P76", "P04"]);
-  assert.deepEqual(prompts(r[1]), ["P48", "P50", "P51", "P53", "P52", "P04"]);
+  assert.deepEqual(prompts(r[1]), ["P50", "P51", "P53", "P52", "P04"]);
   assert.deepEqual(said(r[1]), [
-    "צען", "אינדערפרי", "ביז", "זעקס", "אין אוונט", // today
+    "היינט זענען דא ריידס ביז", "זעקס", "אין אוונט", // today, already open: only until
     "צען", "אינדערפרי", "ביז", "זעקס", "אין אוונט", // usually
     "מארגן", // tomorrow: no rides
     "פון", "מאנטאג", "ביז", "דינסטאג", "צוועלף", "נאכמיטאג", "ביז", "זעקס", "אין אוונט",
