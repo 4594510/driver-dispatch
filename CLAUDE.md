@@ -91,6 +91,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   saved place or address, time; then taken the usual way) and add a place with its code (More). My hours is a week
   calendar: tap a day for other hours, no rides or a break. The app never uses confirm()/alert(): Android's WebView
   shows none (confirm answered "no", so "Can't" and "Stop work" did nothing); questions are in-page sheets (ask()).
+- "Can't" has two choices (Shloime, 2026-11-16): plain, or "Not for an hour": the caller's not-taken message adds P96
+  (try again in an hour; delivery payload reason "hour"). On the phone, no place and nothing to offer, or saying no to
+  the offered time, goes to P70 (change something; 0 back to the read-back) instead of hanging up; "closed" goes to the
+  menu; more than 7 people asks the count again.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
@@ -114,11 +118,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   is not reserved any more, 2026-11-15). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P95 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P96 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P95 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P96 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.
