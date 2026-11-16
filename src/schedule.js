@@ -56,7 +56,42 @@ export function withDay(db, settings, day) {
     closeMinute: h.closed ? settings.closeMinute : h.closeMinute,
     closed: h.closed,
     scheduleChanged: h.changed,
+    breaks: dayBreaks(db, day).map((b) => [b.startMinute, b.endMinute]),
   };
+}
+
+// ---------- breaks the driver plans ahead (several a day; Shloime, 2026-11-16) ----------
+const breakOut = (r) => ({ id: r.id, day: r.day, startMinute: r.start_minute, endMinute: r.end_minute, note: r.note });
+export function dayBreaks(db, day) {
+  return db.prepare("SELECT * FROM driver_breaks WHERE day = ? ORDER BY start_minute").all(day).map(breakOut);
+}
+// The break a minute falls in ([start, end)), or null.
+export const breakAt = (settings, minute) => (settings.breaks || []).find(([s, e]) => minute >= s && minute < e) || null;
+export function addBreak(db, input, actor, settings, now) {
+  const today = localParts(now, settings.timeZone).day;
+  const day = String(input?.day || today);
+  if (!validDay(day)) return { ok: false, error: "Choose the day." };
+  if (day < today) return { ok: false, error: "That day already passed." };
+  const start = Number(input.startMinute);
+  const end = Number(input.endMinute);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 24 * 60) return { ok: false, error: "Choose the times." };
+  if (start >= end) return { ok: false, error: "The break must end after it starts." };
+  const row = { id: newId("brk"), day, start_minute: start, end_minute: end, note: String(input.note || "").trim().slice(0, 200), created_by: actor, created_at: nowIso() };
+  db.prepare("INSERT INTO driver_breaks (id, day, start_minute, end_minute, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(...Object.values(row));
+  audit(db, actor, "break_added", null, { day, start, end });
+  const affected = db.prepare(`SELECT * FROM bookings WHERE day = ? AND pickup_minute >= ? AND pickup_minute < ? AND status IN ('pending','proposed','accepted')`).all(day, start, end);
+  return { ok: true, break: breakOut(row), affected };
+}
+export function removeBreak(db, id, actor) {
+  const row = db.prepare("SELECT * FROM driver_breaks WHERE id = ?").get(String(id));
+  if (!row) return { ok: false, error: "That break is gone." };
+  db.prepare("DELETE FROM driver_breaks WHERE id = ?").run(row.id);
+  audit(db, actor, "break_removed", null, breakOut(row));
+  return { ok: true };
+}
+export function upcomingBreaks(db, settings, now) {
+  const today = localParts(now, settings.timeZone).day;
+  return db.prepare("SELECT * FROM driver_breaks WHERE day >= ? ORDER BY day, start_minute").all(today).map(breakOut);
 }
 
 // The next days (today first), each with its hours.
@@ -150,5 +185,6 @@ export function scheduleView(db, settings, now) {
     usual: { openMinute: settings.openMinute, closeMinute: settings.closeMinute },
     days: nextDays(db, settings, now),
     changes: listChanges(db, settings, now),
+    breaks: upcomingBreaks(db, settings, now),
   };
 }

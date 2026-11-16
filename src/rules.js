@@ -68,6 +68,8 @@ export function checkRequest(now, req, settings = DEFAULT_SETTINGS) {
   if (!settings.windows.includes(req.window)) errors.push("bad_window");
   if (pickup < settings.openMinute || pickup > settings.closeMinute) errors.push("outside_hours");
   if (req.pickupMinute != null && req.pickupMinute < here.minute) errors.push("in_past");
+  // A break the driver planned (settings.breaks, today's): no pickup starts inside it.
+  if ((settings.breaks || []).some(([s, e]) => pickup >= s && pickup < e)) errors.push("driver_break");
   if (req.returnMinute != null) {
     if (req.returnMinute < settings.openMinute || req.returnMinute > settings.closeMinute) errors.push("return_outside_hours");
     if (req.returnMinute <= pickup) errors.push("return_before_pickup");

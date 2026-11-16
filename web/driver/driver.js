@@ -351,7 +351,7 @@ function moreView() {
     <button class="ghost big" data-late>Running late…</button>
     <button class="ghost big" data-sharing="${d.share_location ? "off" : "on"}">${d.share_location ? "Stop sharing my location" : "Share my location again"}</button>
     <p class="quiet">${d.share_location ? "Your location is shared only while you are at work, inside the service hours." : "Your location is not shared. The office can't see where you are."}</p>
-    <button class="ghost big" data-tab-go="hours">My hours (days off)</button>
+    <button class="ghost big" data-tab-go="hours">My hours, days off and breaks</button>
     <button class="ghost big" data-everyone>Send a message to everyone…</button>
     <button class="ghost big" data-feedback>Send a message to the office…</button>
     <button class="ghost big" data-refresh>Load again</button></div>
@@ -388,7 +388,30 @@ function hoursView() {
       ${esc(c.from === c.to ? dayText(c.from) : `${dayText(c.from)} to ${dayText(c.to)}`)}${c.weekdays ? ` <span class="quiet">(${c.weekdays.map((d) => WD[d]).join(", ")})</span>` : ""}
       <div><b>${esc(hoursText(c))}</b></div>${c.note ? `<div class="quiet">${esc(c.note)}</div>` : ""}</div>
       <button class="bad" data-sch-remove="${esc(c.id)}">Remove</button></div>`).join("")}
-      <p class="quiet">When changes overlap, the newest one counts.</p></div>` : ""}`;
+      <p class="quiet">When changes overlap, the newest one counts.</p></div>` : ""}
+    <div class="card"><h2>Breaks</h2>
+      <p class="quiet">Times you are not available. No pickups start inside a break; callers are offered the time after it.</p>
+      ${(sched.breaks || []).map((b) => `<div class="stop"><div class="body">${esc(dayText(b.day))}${b.day === first ? " (today)" : ""}
+        <div><b>${esc(minuteText(b.startMinute))} – ${esc(minuteText(b.endMinute))}</b></div>${b.note ? `<div class="quiet">${esc(b.note)}</div>` : ""}</div>
+        <button class="bad" data-brk-remove="${esc(b.id)}">Remove</button></div>`).join("") || '<p class="quiet">No breaks planned.</p>'}
+      <button class="big" data-brk-add>Add a break…</button></div>`;
+}
+function breakSheet() {
+  const first = sched?.days[0].day || new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  sheet(`<h2>Add a break</h2><form id="brk-form" onsubmit="return false">
+    <label>Day <input type="date" name="day" min="${first}" value="${esc(first)}"></label>
+    <label>From <input type="time" name="start" value="13:00"></label><label>Until <input type="time" name="end" value="13:30"></label>
+    <label>Note <span class="quiet">(optional)</span> <input name="note" maxlength="200"></label>
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-brk-save>Save</button></div></form>
+    <p class="quiet">You can add more than one break on the same day.</p>`);
+}
+async function saveBreak() {
+  const v = Object.fromEntries(new FormData($("#brk-form")));
+  const r = await act("/api/driver/breaks", { day: v.day, startMinute: toMinute(v.start), endMinute: toMinute(v.end), note: v.note }, { queueable: false, ok: "Break saved" });
+  if (!r) return;
+  closeSheet();
+  if (r.affected?.length) alert(`${r.affected.length} ride${r.affected.length > 1 ? "s are" : " is"} already booked in this break (not cancelled).`);
+  loadSchedule();
 }
 function readSheet() {
   const f = $("#sch-form");
@@ -557,6 +580,14 @@ document.addEventListener("click", async (e) => {
   if (ds.schAdd != null) return scheduleSheet();
   if (ds.schKind) { schKind = ds.schKind; scheduleSheet(readSheet()); return; }
   if (ds.schSave != null) return saveSchedule();
+  if (ds.brkAdd != null) return breakSheet();
+  if (ds.brkSave != null) return saveBreak();
+  if (ds.brkRemove) {
+    if (!confirm("Remove this break?")) return;
+    const r = await act(`/api/driver/breaks/${ds.brkRemove}/remove`, {}, { queueable: false, ok: "Removed" });
+    if (r) loadSchedule();
+    return;
+  }
   if (ds.schRemove) {
     if (!confirm("Remove this change? Those days go back to the usual hours.")) return;
     const r = await act(`/api/driver/schedule/${ds.schRemove}/remove`, {}, { queueable: false, ok: "Removed" });

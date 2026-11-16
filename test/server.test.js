@@ -210,7 +210,8 @@ test("the phone line speaks Teltech's format: key first, then { actions } for ea
     assert.deepEqual(r.body.actions.at(-1),
       { prompt: { action: "play", file: "https://dispatch.example/prompts/P04.wav" }, action: "gather", max_digits: 1, timeout: 6000, tries: 1, action_url: "https://dispatch.example/fonory/step?step=menu" });
     const unknown = await call("/fonory/step?key=hook-secret", "POST", { ...first, call_id: "c2", caller_id: "18455559999" });
-    assert.deepEqual(unknown.body.actions, [{ action: "play", file: "https://dispatch.example/prompts/P02.wav" }, { action: "hangup" }]);
+    assert.equal(unknown.body.actions.at(-1).action, "gather", "not registered: may enter the PIN");
+    assert.ok(unknown.body.actions.some((x) => x.file?.endsWith("P02.wav")));
     const status = await call("/fonory/status?key=hook-secret", "POST", { call_id: "c1", status: "completed" });
     assert.equal(status.status, 200);
     assert.equal((await call("/audio/../data.db")).status, 404);
