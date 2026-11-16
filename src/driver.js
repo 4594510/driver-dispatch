@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import { nowIso, audit } from "./db.js";
 import { hashPassword, checkPassword, tooManyTries, noteFailure } from "./auth.js";
 import { getBooking } from "./bookings.js";
-import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./dispatch.js";
+import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute, bookRide } from "./dispatch.js";
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
 import { getSettings } from "./settings.js";
@@ -127,8 +127,9 @@ const publicDriver = (d, tracking = false) => ({
   share_location: d.share_location !== 0, tracking,
 });
 
-// ctx(): { db, travel, settings, now, notify } for this request.
-export function driverRouter(db, ctxFor, appRelease = () => null) {
+// ctx(): { db, travel, settings, now, notify } for this request. extra: { checkAddress(address), addPlace(body, actor) }
+// from the server (the same checks the dashboard uses), for the rides and places the driver adds.
+export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
   const r = express.Router();
 
   r.post("/login", (req, res) => {
@@ -259,6 +260,44 @@ export function driverRouter(db, ctxFor, appRelease = () => null) {
     return rideAction(ctxFor(), id, action, req.body, req.actor, req.driverId);
   }));
 
+  // The driver adds a ride himself (driver feedback, 2026-11-16): for a phone on the list, from a saved place or an
+  // address, at a time. It is saved as a request like any other; the app then takes it (preview, Take it).
+  r.get("/book-options", (_req, res) => {
+    const phones = db.prepare(`SELECT ph.number, h.name AS family, p.name AS person FROM phones ph JOIN households h ON h.id = ph.household_id
+      LEFT JOIN passengers p ON p.id = ph.passenger_id WHERE ph.active = 1 AND h.active = 1 ORDER BY h.name, p.name, ph.number`).all()
+      .map((x) => ({ number: x.number, label: `${x.person ? `${x.person} (${x.family})` : x.family} ..${x.number.slice(-4)}` }));
+    const places = db.prepare("SELECT id, code, name FROM places WHERE active = 1 ORDER BY length(code), code, name").all();
+    res.json({ phones, places });
+  });
+  r.post("/rides", once(async (req) => {
+    const c = ctxFor();
+    const b = req.body || {};
+    const input = {
+      phone: String(b.phone || ""), riderName: String(b.riderName || "").trim(), package: !!b.package,
+      men: Number(b.men) || 0, women: Number(b.women) || 0, pickupMinute: b.pickupMinute ?? null, window: 15,
+    };
+    for (const end of ["pickup", "dropoff"]) {
+      const e = b[end] || {};
+      if (e.placeId) { input[end] = { placeId: String(e.placeId) }; continue; }
+      const address = String(e.address || "").trim();
+      if (!address) continue;
+      const check = extra.checkAddress ? await extra.checkAddress(address) : {};
+      if (check.error) return { ok: false, error: check.error };
+      input[end] = { address, ...(check.point || {}) };
+    }
+    // No name typed: the phone's person, else its family, so the ride isn't nameless on the screens.
+    if (!input.riderName && !input.package) {
+      const who = db.prepare(`SELECT p.name AS person, h.name AS family FROM phones ph JOIN households h ON h.id = ph.household_id
+        LEFT JOIN passengers p ON p.id = ph.passenger_id WHERE ph.number = ?`).get(input.phone);
+      input.riderName = who?.person || who?.family || "";
+    }
+    const out = await bookRide(db, c.travel, input, c.now, c.settings, req.actor);
+    return out.ok ? { ok: true, id: out.bookings[0].id, eta: out.etas[out.bookings[0].id] } : out;
+  }));
+  // The driver adds a saved place with its code (driver feedback, 2026-11-16), the same as the dashboard's Places.
+  r.get("/places", (_req, res) => res.json(db.prepare("SELECT id, code, name, address FROM places WHERE active = 1 ORDER BY length(code), code, name").all()));
+  r.post("/places", once(async (req) => (extra.addPlace ? extra.addPlace({ ...req.body, householdId: null, kind: "other" }, req.actor) : { ok: false, error: "Not available." })));
+
   r.post("/late", once(async (req) => runningLate(ctxFor(), req.driverId, req.body?.minutes)));
 
   r.post("/route/order", once(async (req) => {
@@ -299,7 +338,7 @@ export function todayFor(db, here) {
   const extra = (id) => {
     const b = getBooking(db, id);
     const p = b?.passenger_id ? db.prepare("SELECT notes FROM passengers WHERE id = ?").get(b.passenger_id) : null;
-    return { phone: b?.booked_by_phone, notes: p?.notes || "", together: !!b?.together, b };
+    return { phone: b?.booked_by_phone, notes: p?.notes || "", together: !!b?.together, asked: b ? b.asked_minute ?? b.pickup_minute : null, told: b?.told_minute ?? null, b };
   };
   const stops = route.stops.map((s, i) => {
     const { b, ...e } = extra(s.booking_id);
@@ -314,11 +353,12 @@ export function todayFor(db, here) {
     .map((b) => ({
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women, together: !!b.together,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
-      proposed_minute: b.proposed_minute, phone: b.booked_by_phone, return_of: b.return_of,
+      proposed_minute: b.proposed_minute, phone: b.booked_by_phone, return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
       ...priorityFields(db, b),
     }))
-    // Higher priority first, then by pickup time.
-    .sort((a, b) => b.priority - a.priority || a.window[0] - b.window[0]);
+    // By the time shown (the offered time for one waiting for the caller), earliest on top (driver feedback,
+    // 2026-11-16: "840 should be on top"); the same time: higher priority first.
+    .sort((a, b) => (a.proposed_minute ?? a.window[0]) - (b.proposed_minute ?? b.window[0]) || b.priority - a.priority);
   // Every other ride of the day with where it stands (taken, on board, done, declined, cancelled, no-show), so the
   // one main screen shows them all next to the route.
   const rides = db
@@ -327,7 +367,7 @@ export function todayFor(db, here) {
     .map((b) => ({
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
-      return_of: b.return_of,
+      return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
     }));
   const manual = db.prepare("SELECT manual FROM routes WHERE day = ?").get(here.day)?.manual;
   return {

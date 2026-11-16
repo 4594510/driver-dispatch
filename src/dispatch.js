@@ -361,6 +361,7 @@ export const acceptRide = oneAtATime(async (db, travel, id, driverId, settings =
   const told = new Map(routedRows(db, b.day).filter((r) => r.status === "accepted").map((r) => [r.id, r.eta_minute ?? r.pickup_minute]));
   db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, seat_override = ?, updated_at = ? WHERE id = ?").run(driverId, p.seatConflict ? 1 : 0, nowIso(), id);
   saveRoute(db, b.day, p.after.stops, p.after.timing, p.after.seats);
+  db.prepare("UPDATE bookings SET told_minute = eta_minute WHERE id = ?").run(id); // the time the "accepted" message gives
   const moved = [...told].map(([rid, was]) => ({ was, booking: getBooking(db, rid) }))
     .filter((x) => x.booking.eta_minute != null && x.booking.eta_minute - x.was >= MOVED_MINUTES)
     .map((x) => x.booking);

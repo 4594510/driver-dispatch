@@ -113,3 +113,24 @@ nav button { padding: 10px 4px; }
 .pane .actions .big { padding: 10px; font-size: 17px; }
 .pane .card.next .kind.huge { font-size: 16px; }
 .pane .actions:has(> :only-child) { grid-template-columns: 1fr; }
+/* Colours the driver asked for (2026-11-16): green taken, yellow new (waiting for him), blue waiting for the caller. */
+.tag.new { background: #f5c400; color: #1d1d1b; }
+.tag.wait { background: var(--accent); color: #fff; }
+.tag.taken { background: var(--good); color: #fff; }
+.card.request.waiting { border-color: #f5c400; }
+.card.request.offered { border: 3px solid var(--accent); }
+/* Asked, accepted, ETA, on time or late. */
+.times { font-size: 15px; margin: 4px 0; line-height: 1.6; }
+.times .tag { font-size: 13px; padding: 1px 8px; }
+button.small { float: right; padding: 4px 10px; font-size: 15px; margin-top: -3px; }
+label.check { display: flex; gap: 8px; align-items: center; }
+label.check input { width: auto; margin: 0; }
+#ride-form > input { margin-top: 0; }
+/* My hours as a week calendar: tap a day. */
+.week { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 10px 0; }
+.week .day { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: var(--card); color: var(--ink); border: 1px solid var(--line); padding: 10px; }
+.week .day.changed { border: 2px solid var(--warn); }
+.week .day.closed { border: 2px solid var(--bad); background: #f7dcda; color: var(--bad); }
+.week .dname { font-weight: 700; font-size: 15px; }
+.week .dhours { font-size: 15px; }
+.week .dbreak { font-size: 13px; color: var(--warn); }

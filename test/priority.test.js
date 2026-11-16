@@ -78,14 +78,17 @@ test("priority rules are checked, listed and removed", () => {
 
 const ask = (phone, from, extra = {}) => ({ phone, riderName: "R", men: 0, women: 0, pickup: { placeId: from }, dropoff: { placeId: "shul" }, pickupMinute: 720, window: 15, ...extra });
 
-test("the driver sees higher-priority requests first, marked", async () => {
+test("the driver sees requests earliest first (driver feedback 2026-11-16), priority marked and first at the same time", async () => {
   const db = setup();
   addPriority(db, { householdId: "hhB", level: 2 }, "a");
   const travel = fakeTravel();
   await bookRide(db, travel, ask("+18455550001", "homeA", { men: 1, pickupMinute: 11 * 60 }), now, settings);
   await bookRide(db, travel, ask("+18455550003", "homeB", { men: 1, pickupMinute: 12 * 60 }), now, settings);
-  const t = todayFor(db, { day, minute: 600 });
-  assert.deepEqual(t.requests.map((r) => r.priority_label), ["Top", "Normal"]);
+  let t = todayFor(db, { day, minute: 600 });
+  assert.deepEqual(t.requests.map((r) => [r.priority_label, r.window[0]]), [["Normal", 660], ["Top", 720]], "8:40 above 8:50");
+  await bookRide(db, travel, ask("+18455550001", "homeA", { women: 1, pickupMinute: 12 * 60 }), now, settings);
+  t = todayFor(db, { day, minute: 600 });
+  assert.deepEqual(t.requests.map((r) => [r.priority_label, r.window[0]]), [["Normal", 660], ["Top", 720], ["Normal", 720]]);
 });
 
 test("accepting a ride that leaves no room for a waiting higher-priority one is flagged first", async () => {

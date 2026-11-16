@@ -32,6 +32,11 @@ function rideInfo(db, b, payload = {}) {
 
 // Queue a message about a ride. kind: booked | accepted | not_taken | time_change | reminder | late | cancelled.
 export function notifyBooking(db, booking, kind, payload = {}, dueAt = nowIso()) {
+  // The pickup time the caller is told now (the driver app shows it as "accepted").
+  if (["accepted", "late"].includes(kind) && booking.id) {
+    const minute = payload.minute ?? booking.eta_minute;
+    if (minute != null) db.prepare("UPDATE bookings SET told_minute = ? WHERE id = ?").run(Math.round(minute), booking.id);
+  }
   const phone = db.prepare("SELECT * FROM phones WHERE number = ? AND active = 1").get(booking.booked_by_phone);
   if (!phone) return 0;
   const add = db.prepare(`INSERT INTO deliveries (booking_id, phone, channel, kind, status, payload, body, due_at, updated_at)
