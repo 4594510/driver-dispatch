@@ -22,6 +22,20 @@ const priorityFields = (db, b) => {
 };
 import { addFeedback, listFeedback } from "./feedback.js";
 import { createAnnouncement } from "./announcements.js";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+
+// A fingerprint of the app's own page files: an app page opened before an update loads itself again (a WebView kept
+// open for days ran the old page, so fixes didn't reach the driver; feedback, 2026-11-16).
+export const WEB_VERSION = (() => {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "driver");
+  const h = crypto.createHash("sha256");
+  for (const f of ["index.html", "driver.js", "driver.css"]) {
+    try { h.update(fs.readFileSync(path.join(dir, f))); } catch { /* missing in a test */ }
+  }
+  return h.digest("hex").slice(0, 12);
+})();
 
 const SESSION_DAYS = 90;
 const STATUSES = ["online", "offline", "paused"];
@@ -181,7 +195,7 @@ export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
     const d = forgetIfHidden(db, c.settings, driverNow(db, req.driverId, c.now), c.now);
     const here = localParts(c.now, c.settings.timeZone);
     // app: the newest Android app ({ version, url }), so an older app offers the update.
-    res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings), app: appRelease() });
+    res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings), app: appRelease(), web: WEB_VERSION });
   });
 
   // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).
@@ -332,13 +346,25 @@ function namesFor(db, p) {
   return Object.fromEntries([...ids].map((id) => [id, getBooking(db, id)?.rider_name || ""]));
 }
 
+// Who called for a ride (driver feedback, 2026-11-16: "every trip should say who called"): the phone's person or family
+// and its number, e.g. "Moshe (Cohen family) · 845-555-0001".
+export function callerOf(db, b) {
+  if (!b) return "";
+  const ph = db.prepare(`SELECT p.name AS person FROM phones ph LEFT JOIN passengers p ON p.id = ph.passenger_id WHERE ph.number = ?`).get(b.booked_by_phone);
+  const family = db.prepare("SELECT name FROM households WHERE id = ?").get(b.household_id)?.name || "";
+  const who = ph?.person ? `${ph.person}${family ? ` (${family})` : ""}` : family;
+  const n = String(b.booked_by_phone || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  const number = n.length === 10 ? `${n.slice(0, 3)}-${n.slice(3, 6)}-${n.slice(6)}` : n;
+  return [who, number].filter(Boolean).join(" · ");
+}
+
 // Today's route with what the driver needs at each stop, and the waiting requests.
 export function todayFor(db, here) {
   const route = dayRoute(db, here.day);
   const extra = (id) => {
     const b = getBooking(db, id);
     const p = b?.passenger_id ? db.prepare("SELECT notes FROM passengers WHERE id = ?").get(b.passenger_id) : null;
-    return { phone: b?.booked_by_phone, notes: p?.notes || "", together: !!b?.together, asked: b ? b.asked_minute ?? b.pickup_minute : null, told: b?.told_minute ?? null, b };
+    return { phone: b?.booked_by_phone, caller: callerOf(db, b), notes: p?.notes || "", together: !!b?.together, asked: b ? b.asked_minute ?? b.pickup_minute : null, told: b?.told_minute ?? null, b };
   };
   const stops = route.stops.map((s, i) => {
     const { b, ...e } = extra(s.booking_id);
@@ -353,12 +379,13 @@ export function todayFor(db, here) {
     .map((b) => ({
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women, together: !!b.together,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
-      proposed_minute: b.proposed_minute, phone: b.booked_by_phone, return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
+      proposed_minute: b.proposed_minute, phone: b.booked_by_phone, caller: callerOf(db, b), return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
       ...priorityFields(db, b),
     }))
     // By the time shown (the offered time for one waiting for the caller), earliest on top (driver feedback,
     // 2026-11-16: "840 should be on top"); the same time: higher priority first.
     .sort((a, b) => (a.proposed_minute ?? a.window[0]) - (b.proposed_minute ?? b.window[0]) || b.priority - a.priority);
+  const dropoffAt = new Map(stops.filter((s) => s.kind === "dropoff").map((s) => [s.booking_id, s.arrive]));
   // Every other ride of the day with where it stands (taken, on board, done, declined, cancelled, no-show), so the
   // one main screen shows them all next to the route.
   const rides = db
@@ -368,6 +395,8 @@ export function todayFor(db, here) {
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
       return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
+      // On board: the drop-off time counts now, not the pickup (driver feedback, 2026-11-16).
+      dropoff_eta: dropoffAt.get(b.id) ?? null, phone: b.booked_by_phone, caller: callerOf(db, b),
     }));
   const manual = db.prepare("SELECT manual FROM routes WHERE day = ?").get(here.day)?.manual;
   return {

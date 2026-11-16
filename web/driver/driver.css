@@ -134,3 +134,8 @@ label.check input { width: auto; margin: 0; }
 .week .dname { font-weight: 700; font-size: 15px; }
 .week .dhours { font-size: 15px; }
 .week .dbreak { font-size: 13px; color: var(--warn); }
+.caller { font-size: 14px; color: var(--quiet); margin: 2px 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.row-actions button.small, p button.small { float: none; margin: 0; }
+.timepick { display: flex; gap: 6px; }
+.timepick select { flex: 1; }

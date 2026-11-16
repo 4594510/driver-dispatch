@@ -147,8 +147,12 @@ function peopleOf(c, men, women) {
 // ---------- the schedule ----------
 // Today's hours (c.settings holds today's, from getSettings(db, now)): "today there are rides from 10 to 6", or "today
 // there are no rides".
+// Once the day's rides have started, "from" says nothing new: only "until" (driver feedback, 2026-11-16). After the
+// last time the whole hours are said again.
 function hoursToday(c) {
   if (c.settings.closed) return [P("P49")];
+  const now = today(c).minute;
+  if (now >= c.settings.openMinute && now <= c.settings.closeMinute) return [c.say(W.ridesUntil), timeOf(c, c.settings.closeMinute)];
   return [P("P48"), timeOf(c, c.settings.openMinute), c.say(W.until), timeOf(c, c.settings.closeMinute)];
 }
 const usualOpen = (c) => c.settings.usualOpenMinute ?? c.settings.openMinute;
@@ -700,6 +704,8 @@ const STEPS = {
       c.st.draft = null;
       return ask("menu", [P("P71"), MENU]);
     }
+    // * says it all again (who, from, to, the time), without "wrong key" (driver feedback, 2026-11-16).
+    if (c.keys === "*") return ask("confirm", readBack(c));
     return retry(c, "confirm", readBack(c));
   },
   offer(c) {

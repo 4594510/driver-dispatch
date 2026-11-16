@@ -125,6 +125,7 @@ export const W = {
   to: "קיין",
   at: "אום",
   until: "ביז",
+  ridesUntil: "היינט זענען דא ריידס ביז",
   and: "און",
   men: "מענער",
   women: "פרויען",

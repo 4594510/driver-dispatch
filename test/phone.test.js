@@ -834,3 +834,22 @@ test("the driver's \"Can't, not for an hour\": the caller also hears to try agai
   assert.match(text(one.id), /פרובירט נאכאמאל אין א שעה/);
   assert.doesNotMatch(text(two.id), /פרובירט/);
 });
+
+test("key 4 before the rides start says 'from ... until'; once they started only 'until' (driver feedback, 2026-11-16)", async () => {
+  const db = setup();
+  const early = await call(db, ["4"], { extra: { now: new Date("2026-11-11T14:00:00Z") } }); // 9 AM
+  assert.ok(prompts(early[1]).includes("P48"));
+  const open = await call(db, ["4"], { id: "c2" }); // inside the hours
+  assert.ok(!prompts(open[1]).includes("P48"));
+  assert.equal(said(open[1])[0], "היינט זענען דא ריידס ביז");
+});
+
+test("* at the read-back says it all again, without 'wrong key' (driver feedback, 2026-11-16)", async () => {
+  const db = setup();
+  const r = await call(db, ["1", "1", "0", "20", "2", "1200", "*", "*", "*", "*", "1"]);
+  for (const i of [7, 8, 9, 10]) {
+    assert.deepEqual(prompts(r[i]), ["P19", "P20"]);
+    assert.equal(r[i].gather.step, "confirm");
+  }
+  assert.ok(prompts(r[11]).includes("P21"), "then 1 still books");
+});
