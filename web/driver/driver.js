@@ -52,6 +52,17 @@ function ask(text, yes = "Yes", danger = false) {
     askDone = resolve;
   });
 }
+// "Can't": plain, or "not for an hour" (the caller also hears to try again in an hour). Answers "", "hour" or null.
+function askReject() {
+  return new Promise((resolve) => {
+    if (askDone) askDone(false);
+    sheet(`<h2>Can't take this ride? The caller gets a message.</h2>
+      <button class="bad big" data-ask="plain">Can't take it</button>
+      <button class="bad big" data-ask="hour">Not for an hour (they hear: try again in an hour)</button>
+      <button class="ghost big" data-ask="no">Back</button>`);
+    askDone = (v) => resolve(v === "plain" ? "" : v === "hour" ? "hour" : null);
+  });
+}
 function info(text) {
   sheet(`<p>${esc(text).replace(/\n/g, "<br>")}</p><button class="ghost big" data-close>OK</button>`);
 }
@@ -735,7 +746,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-tab-go]");
   if (!t) return;
   const ds = t.dataset;
-  if (ds.ask) { const f = askDone; askDone = null; $("#sheet").hidden = true; f?.(ds.ask === "yes"); return; }
+  if (ds.ask) { const f = askDone; askDone = null; $("#sheet").hidden = true; f?.(["plain", "hour"].includes(ds.ask) ? ds.ask : ds.ask === "yes"); return; }
   if (ds.week != null) { week = Number(ds.week); render(); return; }
   if (ds.day) return daySheet(ds.day);
   if (ds.dayHours || ds.dayClosed) { schKind = ds.dayHours ? "hours" : "closed"; const d = ds.dayHours || ds.dayClosed; scheduleSheet({ from: d, to: d }); return; }
@@ -785,11 +796,12 @@ document.addEventListener("click", async (e) => {
     const id = ds.id;
     const names = { pickup: "Picked up", done: "Dropped off", no_show: "No-show", accept: "Taken", reject: "The caller is told" };
     if (ds.act === "no_show" && !(await ask("Nobody came? The seats are freed.", "No-show", true))) return;
-    if (ds.act === "reject" && !(await ask("Can't take this ride? The caller gets a message.", "Can't take it", true))) return;
+    let reason = "";
+    if (ds.act === "reject") { reason = await askReject(); if (reason == null) return; }
     closeSheet();
     const queueable = ["pickup", "done", "no_show"].includes(ds.act);
     if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
-    await act(`/api/driver/bookings/${id}/${ds.act}`, ds.override ? { override: true } : {}, { queueable, ok: names[ds.act] });
+    await act(`/api/driver/bookings/${id}/${ds.act}`, ds.override ? { override: true } : reason ? { reason } : {}, { queueable, ok: names[ds.act] });
     return;
   }
   if (ds.take) return take(ds.take);

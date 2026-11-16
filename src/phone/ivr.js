@@ -447,7 +447,11 @@ async function bookOnce(c) {
     const offer = r.suggestions[0];
     return { offer, res: ask("offer", [refusal, P("P27"), timeOf(c, offer), P("P27b")]) };
   }
-  return { res: end([refusal]) };
+  // No place and no time to offer: back to change something (P70: the time, people, from, to), not hung up (Shloime,
+  // 2026-11-16). No rides today at all: the menu. A phone not registered still ends.
+  if (r.errors[0] === "not_registered") return { res: end([refusal]) };
+  if (r.errors[0] === "closed") return { res: ask("menu", [refusal, MENU]) };
+  return { res: ask("more", [refusal, ...Q.more()]) };
 }
 
 const STEPS = {
@@ -607,7 +611,7 @@ const STEPS = {
     const n = Number(c.keys);
     if (c.keys === "" || !(n >= 0 && n <= 6)) return retry(c, "extra_women", Q.extra_women());
     setPeople(c, c.st.draft.extraMen || 0, n);
-    if (c.st.draft.men + c.st.draft.women > 7) return end([P("P23")]);
+    if (c.st.draft.men + c.st.draft.women > 7) return ask("extra_men", [P("P23"), ...Q.extra_men()]); // ask again, not hung up
     return afterPeople(c);
   },
   men(c) {
@@ -623,7 +627,7 @@ const STEPS = {
     // 0 men and 0 women: a package only (no riders, no seats).
     d.package = n + d.men === 0;
     d.women = n;
-    if (d.men + n > 7) return end([P("P23")]);
+    if (d.men + n > 7) return ask("men", [P("P23"), ...Q.men()]); // more than 7: ask again, not hung up
     // The rider named on the ride (a person's own phone) only when the counts include them: someone may book for others.
     const named = d.passengerId && passenger(c, d.passengerId);
     if (named && (named.gender === "f" ? n : d.men) === 0) d.passengerId = null;
@@ -704,7 +708,10 @@ const STEPS = {
       c.st.offer = null;
       return book(c);
     }
-    return end([]);
+    // Not the offered time: change something instead (P70), not hung up (Shloime, 2026-11-16).
+    if (!c.st.draft) return ask("menu", MENU);
+    c.st.offer = null;
+    return ask("more", Q.more());
   },
   rides_menu(c) {
     if (c.keys === "0") return ask("menu", MENU);
@@ -948,7 +955,7 @@ async function outbound(c) {
     case "accepted":
       return end([P("P39"), riderPiece(c, b), P("P31"), timeOf(c, eta)]);
     case "not_taken":
-      return end([P("P40"), riderPiece(c, b)]);
+      return end([P("P40"), riderPiece(c, b), payload.reason === "hour" ? P("P96") : null]);
     case "late":
       return end([P("P45"), timeOf(c, payload.minute ?? eta), riderPiece(c, b)]);
     case "cancelled":

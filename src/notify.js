@@ -27,6 +27,7 @@ function rideInfo(db, b, payload = {}) {
     time: timeText(payload.minute ?? b.eta_minute ?? b.pickup_minute),
     oldTime: payload.oldMinute != null ? timeText(payload.oldMinute) : "",
     newTime: payload.newMinute != null ? timeText(payload.newMinute) : "",
+    hour: payload.reason === "hour", // "Can't, not for an hour": try again in an hour (P96)
   };
 }
 

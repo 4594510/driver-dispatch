@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P95, some unused) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P96, some unused) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -115,6 +115,8 @@ export const PROMPTS = {
   P94: "אייער רייד איז געשיקט געווארן צום דרייווער. רופט צוריק אין א פאר מינוט צו הערן אויב עס איז קאנפירמט.",
   // Said right after a from or to place is taken, before the next question (instead of reading the place back).
   P95: "גוט, באקומען.",
+  // After P40 when the driver pressed "Can't, not for an hour" (Shloime, 2026-11-16).
+  P96: "דער דרייווער איז נישט אוועילעבל די קומענדיגע שעה. פרובירט נאכאמאל אין א שעה ארום.",
 };
 
 // Small words between pieces, recorded once like the numbers.
@@ -202,7 +204,7 @@ export function allPieces() {
 export const TEXTS = {
   booked: (r) => `${LINE_NAME}: אייער רייד ${r.name ? `פאר ${r.name} ` : ""}${W.at} ${r.time} איז געשיקט געווארן צום דרייווער. איר וועט באקומען א קאנפירמעישן.`,
   accepted: (r) => `${PROMPTS.P39} ${r.name ? `${r.name}, ` : ""}${W.from} ${r.from} ${W.to} ${r.to}. ${PROMPTS.P31} ${r.time}.`,
-  not_taken: (r) => `${PROMPTS.P40}${r.name ? ` (${r.name}, ${r.time})` : ""}`,
+  not_taken: (r) => `${PROMPTS.P40}${r.name ? ` (${r.name}, ${r.time})` : ""}${r.hour ? ` ${PROMPTS.P96}` : ""}`,
   time_change: (r) => `${PROMPTS.P38a} ${r.name ? `${r.name}: ` : ""}${r.oldTime} → ${r.newTime}. רופט אן ${LINE_NAME} צו זאגן יא אדער ניין.`,
   reminder: (r) => `${PROMPTS.P37a} ${r.name ? `${r.name}, ` : ""}${r.time}.`,
   late: (r) => `${PROMPTS.P45} ${r.time}${r.name ? ` (${r.name})` : ""}.`,

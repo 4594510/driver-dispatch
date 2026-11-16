@@ -34,7 +34,8 @@ export async function rideAction(ctx, id, action, body, actor, driverId) {
   const r = changeStatus(db, id, action, actor, now, settings);
   if (!r.ok) return r;
   if (["accepted", "picked_up"].includes(was.status)) await refreshDay(db, travel, was.day, settings, now);
-  if (action === "reject") notify(r.booking, "not_taken");
+  // "Can't, not for an hour" (reason "hour"): the caller also hears to try again in an hour (P96).
+  if (action === "reject") notify(r.booking, "not_taken", body?.reason === "hour" ? { reason: "hour" } : {});
   if (action === "cancel" && !actor.startsWith("phone:")) notify(r.booking, "cancelled");
   return { ok: true, booking: getBooking(db, id) };
 }
