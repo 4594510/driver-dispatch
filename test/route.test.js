@@ -100,3 +100,16 @@ test("overlapping rides go in road order: A 1→3 and B 2→4 make 1, 2, 3, 4", 
   assert.ok(res.ok);
   assert.deepEqual(order(res.stops), ["b.pickup", "a.dropoff", "b.dropoff"]);
 });
+
+test("two requests for the same time: the new one goes after the rider already promised, not in front", () => {
+  // b's pickup is 3 away and on the way back; going there first would save 3 minutes of driving but make a later.
+  const a = ride("a", 0, 20, 600);
+  const first = buildRoute([a], ctx);
+  const res = insertRide(first.stops, [a], ride("b", 3, 0, 600), ctx);
+  assert.ok(res.ok);
+  assert.equal(res.stops[0].ride, "a");
+  const e = etas(res.stops, res.timing);
+  assert.equal(e.a.pickup, 600);
+  // b gets the real time: the driver has to come from a's pickup first.
+  assert.equal(e.b.pickup, 603);
+});

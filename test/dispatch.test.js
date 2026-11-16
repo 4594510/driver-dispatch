@@ -258,3 +258,52 @@ test("a booking on a full day is answered at once (14 rides on the route used to
   assert.ok(r.ok, JSON.stringify(r.errors));
   assert.ok(Date.now() - t < 3000, `took ${Date.now() - t} ms`);
 });
+
+test("rides at the same time get real times, and a rider pushed later hears the new time", async () => {
+  const { rideAction } = await import("../src/actions.js");
+  const db = setup();
+  db.prepare("UPDATE phones SET notify = 'text'").run();
+  const travel = fakeTravel();
+  const sent = [];
+  const { notifyBooking } = await import("../src/notify.js");
+  const c = { db, travel, settings, now, notify: (b, kind, payload) => { sent.push({ id: b.id, kind, minute: payload?.minute }); notifyBooking(db, b, kind, payload); } };
+  const spot = (lat) => db.prepare("UPDATE drivers SET last_lat = ?, last_lng = -74, last_seen_at = ?").run(lat, now.toISOString());
+  // Three requests for 10:00 from three places: the driver is at the first one.
+  spot(41);
+  const book = async (from, to) => (await bookRide(db, travel, ask({ pickup: { address: from }, dropoff: { address: to }, pickupMinute: 600 }), now, settings)).bookings[0];
+  const a = await book("1 Example Ln", "5 Sample Rd");
+  const b = await book("3 Other St", "5 Sample Rd");
+  assert.ok((await rideAction(c, a.id, "accept", {}, "driver:drv1", "drv1")).ok);
+  assert.equal(getBooking(db, a.id).eta_minute, 600);
+  assert.ok((await rideAction(c, b.id, "accept", {}, "driver:drv1", "drv1")).ok);
+  // Not everyone at 10:00: b is 5 minutes on from a.
+  assert.equal(getBooking(db, a.id).eta_minute, 600);
+  assert.equal(getBooking(db, b.id).eta_minute, 605);
+  // The driver went to 51 meanwhile; a third ride there makes a's pickup 10 minutes later than a was told.
+  spot(51);
+  const d = await book("5 Sample Rd", "3 Other St");
+  db.prepare("UPDATE deliveries SET status = 'sent'").run();
+  sent.length = 0;
+  const r = await rideAction(c, d.id, "accept", {}, "driver:drv1", "drv1");
+  assert.ok(r.ok);
+  const aNow = getBooking(db, a.id).eta_minute;
+  assert.ok(aNow >= 605, String(aNow));
+  assert.deepEqual(sent.filter((x) => x.id === a.id), [{ id: a.id, kind: "late", minute: aNow }]);
+});
+
+test("a rider pushed later before their 'accepted' text went out gets that text with the new time, not two messages", async () => {
+  const { tellMoved } = await import("../src/actions.js");
+  const { notifyBooking } = await import("../src/notify.js");
+  const db = setup();
+  db.prepare("UPDATE phones SET notify = 'text'").run();
+  const travel = fakeTravel();
+  const a = (await bookRide(db, travel, ask(), now, settings)).bookings[0];
+  await acceptRide(db, travel, a.id, "drv1", settings, now);
+  notifyBooking(db, getBooking(db, a.id), "accepted");
+  db.prepare("UPDATE bookings SET eta_minute = 735 WHERE id = ?").run(a.id);
+  tellMoved({ db, notify: (b, kind, p) => notifyBooking(db, b, kind, p) }, [getBooking(db, a.id)]);
+  const rows = db.prepare("SELECT kind, body FROM deliveries WHERE booking_id = ?").all(a.id);
+  assert.deepEqual(rows.map((r) => r.kind), ["accepted"]);
+  const { timeText } = await import("../src/phone/words.js");
+  assert.ok(rows[0].body.includes(timeText(735)));
+});

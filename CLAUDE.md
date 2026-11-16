@@ -56,6 +56,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - The driver may take a ride that GPS says he'll reach after its window (Shloime, 2026-11-16, "accept as is"): the
   app shows the asked time and the GPS time, nobody else gets later (route.js insertRide lateOk, only for the driver's
   accept), and the caller's "accepted" message gives the real time. Phone bookings still offer the nearest time that fits.
+- Rides asked for the same time (feedback, 2026-11-16: "it puts everything on the original time"): a ride the driver
+  takes goes after the riders already promised when its window allows (route.js PUSH_WEIGHT), and is told its real time
+  (the drive from the stop before). A rider already taken whom a new ride still pushes 5+ minutes past the time they
+  were told hears the new time (P45; dispatch.js MOVED_MINUTES, actions.js tellMoved; an "accepted" text not sent yet
+  is rewritten instead).
 - A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
