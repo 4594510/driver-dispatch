@@ -74,8 +74,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   Never tracked outside the service hours of the day (schedule changes included), even while online; the driver can
   turn sharing off in the app (More; drivers.share_location, shared_since) (feedback, 2026-11-15). The app turns GPS
   on only when the server's today says driver.tracking.
-- Driver app is kept very simple (the driver is not technical): Now / Today / More, one Start/Stop work button, new
-  rides on the Now screen with "Take it" / "Can't", one big button per stop.
+- Driver app is kept very simple (the driver is not technical): Rides / More, one Start/Stop work button. Rides is one
+  screen (2026-11-16, the driver found Now / Today confusing): the route (next stop big with its one button, then the
+  stops in order, "Change the order") and the requests (new ones with "Take it" / "Can't", then every ride of the day
+  with its status: taken, on board, done, declined, cancelled, no-show; /today's rides), each half scrolling on its
+  own, one above the other on a phone, side by side on a wide or sideways screen.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).

@@ -77,3 +77,39 @@ button.huge-btn { width: 100%; padding: 22px; font-size: 24px; font-weight: 800;
 button.link { display: block; width: 100%; margin-top: 10px; background: none; border: 0; color: var(--accent); text-decoration: underline; font-size: 16px; }
 .actions a button { width: 100%; }
 nav button.on { outline: none; }
+/* One main screen (2026-11-16): the route and the requests together, each half scrolling on its own.
+   A phone stacks them (route on top); a wide screen or a phone turned sideways puts them side by side. */
+#app:not([hidden]) { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+#app header, #app nav { position: static; flex: none; }
+#app main { flex: 1; min-height: 0; overflow-y: auto; width: 100%; }
+main.split { display: flex; flex-direction: column; gap: 10px; max-width: none; padding: 10px; overflow: hidden; }
+main.split > .card { flex: none; margin: 0; }
+.pane { flex: 1 1 0; min-height: 0; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 0 10px 10px; -webkit-overflow-scrolling: touch; }
+.pane.small { flex: 0 0 auto; }
+.pane-title { position: sticky; top: 0; z-index: 1; margin: 0 -10px 8px; padding: 10px 12px; background: var(--card); border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; font-size: 18px; }
+.pane-title .count { vertical-align: 2px; }
+.pane .card { margin-bottom: 10px; padding: 12px; }
+.pane .card.list { padding: 2px 12px; }
+.pane .actions { margin-top: 0; }
+.pane button.huge-btn { padding: 16px; font-size: 22px; margin-top: 10px; }
+@media (min-width: 720px), (orientation: landscape) and (min-width: 560px) {
+  main.split { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); }
+  main.split:has(> .card) { grid-template-rows: auto minmax(0, 1fr); }
+  main.split > .card { grid-column: 1 / -1; }
+}
+.tag { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 14px; font-weight: 700; }
+.tag.new { background: var(--warn); color: #fff; }
+.tag.wait { background: #fbeed9; color: #6b3d00; }
+.tag.taken { background: #dff3e5; color: var(--good); }
+.tag.done { background: #eee; color: #555; }
+.tag.no { background: #f7dcda; color: var(--bad); }
+.card.request.offered { border-color: var(--line); }
+/* A thinner top bar, so both halves get more room: name, status and the Start/Stop button on one line. */
+header { padding: 8px 12px; }
+.status-line #me { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#work button.big { width: auto; margin: 0; padding: 10px 16px; font-size: 17px; }
+nav button { padding: 10px 4px; }
+.stop .time { width: 84px; white-space: nowrap; font-size: 16px; }
+.pane .actions .big { padding: 10px; font-size: 17px; }
+.pane .card.next .kind.huge { font-size: 16px; }
+.pane .actions:has(> :only-child) { grid-template-columns: 1fr; }

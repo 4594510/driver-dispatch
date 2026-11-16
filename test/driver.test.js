@@ -81,6 +81,7 @@ test("a day in the app: online, accept with preview, stops in order, pickup and 
     const b = (await call("/api/admin/bookings", "POST", ride({ riderName: "Second", pickup: { address: "7 Next Ave" }, dropoff: { address: "3 Other St" }, pickupMinute: 735 }))).body.bookings[0].id;
     let today = (await call("/api/driver/today")).body;
     assert.deepEqual(today.requests.map((r) => r.rider_name), ["Test", "Second"]);
+    assert.deepEqual(today.rides, [], "waiting requests are not in the other rides");
 
     // Accept the first; the same action sent twice (no signal, sent again) is done once.
     const first = await call(`/api/driver/bookings/${a}/accept`, "POST", { key: "k1" });
@@ -97,6 +98,7 @@ test("a day in the app: online, accept with preview, stops in order, pickup and 
 
     today = (await call("/api/driver/today")).body;
     assert.equal(today.requests.length, 0);
+    assert.deepEqual(today.rides.map((r) => [r.rider_name, r.status]), [["Test", "accepted"], ["Second", "accepted"]], "the day's rides with where they stand");
     assert.equal(today.route.stops.length, 4);
     assert.equal(today.next.booking_id, a);
     assert.equal(today.next.kind, "pickup");
@@ -132,6 +134,7 @@ test("a day in the app: online, accept with preview, stops in order, pickup and 
     assert.equal((await call(`/api/driver/bookings/${a}/no_show`, "POST", {})).status, 400, "already dropped off");
     today = (await call("/api/driver/today")).body;
     assert.equal(today.next, null);
+    assert.deepEqual(today.rides.map((r) => r.status), ["completed", "no_show"]);
   });
 });
 

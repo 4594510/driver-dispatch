@@ -19,7 +19,8 @@ let tab = "next";
 let queue = store.get("driver.queue", []);
 let seenRequests = new Set(store.get("driver.seen", []));
 let lastOk = store.get("driver.lastOk");
-let reorder = null; // the Day tab's order while the driver is moving stops
+let reorder = null; // the route's order while the driver is moving stops
+let jumpToRequests = false; // a new request came: show the requests from the top
 
 const ERRORS = {
   not_pending: "This ride isn't waiting for an answer any more.", no_time: "The route can't fit this ride without making others late.",
@@ -159,6 +160,7 @@ function alertNewRequests() {
   const fresh = (today.requests || []).filter((r) => !seenRequests.has(r.id));
   if (fresh.length && today.driver.status === "online") {
     if (tab !== "next" && !reorder) tab = "next"; // a new ride: show it
+    jumpToRequests = true;
     beep();
     navigator.vibrate?.([300, 150, 300]);
   }
@@ -244,9 +246,13 @@ function render() {
   $("#req-count").hidden = !n;
   const main = $("#main");
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === (tab === "hours" ? "more" : tab));
-  if (tab === "next") main.innerHTML = updateView() + nextView();
-  else if (tab === "day") main.innerHTML = dayView();
-  else if (tab === "hours") main.innerHTML = `<button class="ghost" data-tab-go="more">← Back</button>${hoursView()}`;
+  const scrolls = [...main.querySelectorAll(".pane")].map((p) => p.scrollTop);
+  main.classList.toggle("split", tab === "next");
+  if (tab === "next") {
+    main.innerHTML = ridesView();
+    if (!jumpToRequests) main.querySelectorAll(".pane").forEach((p, i) => (p.scrollTop = scrolls[i] || 0));
+    jumpToRequests = false;
+  } else if (tab === "hours") main.innerHTML = `<button class="ghost" data-tab-go="more">← Back</button>${hoursView()}`;
   else main.innerHTML = updateView() + moreView();
 }
 
@@ -297,8 +303,8 @@ function stopCard(s, big) {
 // A new ride request: who, from where to where, when; "Take it" or "Can't".
 function requestCard(r) {
   const proposed = r.status === "proposed";
-  return `<div class="card request">
-    <div class="kind huge">${proposed ? "Waiting for the caller" : "New ride"}${r.return_of ? " · ride back" : ""}</div>
+  return `<div class="card request ${proposed ? "offered" : ""}">
+    <div>${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}</div>
     <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     <div class="addr">${esc(r.from)} → ${esc(r.to)}</div>
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
@@ -311,37 +317,70 @@ function requestCard(r) {
   </div>`;
 }
 
-// The main screen: new requests first, then the next stop, then the two after it.
-function nextView() {
-  const reqs = (today.requests || []).map(requestCard).join("");
-  const s = today.next;
-  if (!s) {
-    if (reqs) return reqs;
-    return `<div class="card"><h2>No rides right now</h2><p class="quiet">${today.driver.status === "online" ? "A new ride shows here and the phone rings." : "Press Start work to get rides."}</p></div>`;
-  }
-  const after = today.route.stops.filter((x) => x.index > s.index && ["accepted", "picked_up"].includes(x.status)).slice(0, 2);
-  return `${reqs}${stopCard(s, true)}${after.length ? `<h3 class="quiet">After that</h3>${after.map((x) => stopCard(x, false)).join("")}` : ""}`;
+// The one main screen (2026-11-16, the driver found the tabs confusing): the route on one half, every ride of the day
+// with where it stands on the other. Side by side on a wide screen, one above the other on a phone.
+function ridesView() {
+  const route = routePane();
+  const rides = ridesPane();
+  return `${updateView()}<section class="pane ${route.empty ? "small" : ""}"><h3 class="pane-title">Route${route.sub}</h3>${route.html}</section>
+    <section class="pane ${rides.empty ? "small" : ""}"><h3 class="pane-title">Requests${rides.sub}</h3>${rides.html}</section>`;
 }
 
-function dayView() {
-  const stops = reorder || today.route.stops;
-  if (!stops.length) return '<div class="card"><p class="quiet">No rides on the route today.</p></div>';
-  const editing = !!reorder;
-  return `<div class="card">
-    <div class="quiet">${today.route.driveMinutes ?? 0} minutes of driving${today.route.estimated ? " (some guessed)" : ""}${today.route.manual ? " · your own order" : ""}</div>
-    ${stops.map((s, i) => {
-      const done = !["accepted", "picked_up"].includes(s.status) || (s.kind === "pickup" && s.status === "picked_up");
-      return `<div class="stop ${done ? "done" : ""}">
-        <div class="time">${editing ? "" : minuteText(s.arrive)}</div>
-        <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-          <b>${esc(s.rider_name)}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
-        ${editing ? `<div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>` : ""}
-      </div>`;
-    }).join("")}
-  </div>
-  ${editing
-    ? `<div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`
-    : `<div class="actions"><button class="ghost" data-reorder>Change the order</button>${today.route.manual ? '<button class="ghost" data-auto>Back to the best order</button>' : ""}</div>`}`;
+// The route: the next stop big, with its button, then the stops after it in order.
+function routePane() {
+  if (reorder) return { sub: "", html: orderEditor() };
+  const s = today.next;
+  const left = today.route.stops.filter((x) => ["accepted", "picked_up"].includes(x.status) && !(x.kind === "pickup" && x.status === "picked_up"));
+  const sub = left.length ? ` <span class="quiet">· ${left.length} stop${left.length > 1 ? "s" : ""} · ${today.route.driveMinutes ?? 0} min driving${today.route.estimated ? " (some guessed)" : ""}</span>` : "";
+  if (!s) {
+    return { empty: true, sub, html: `<div class="card"><h2>No stops right now</h2><p class="quiet">${today.driver.status === "online" ? "Rides you take show here, in order." : "Press Start work to get rides."}</p></div>` };
+  }
+  const after = left.filter((x) => x.index > s.index);
+  return {
+    sub,
+    html: `${stopCard(s, true)}${after.length ? `<div class="card list">${after.map(stopRow).join("")}</div>` : ""}
+      <div class="actions"><button class="ghost" data-reorder>Change the order</button>${today.route.manual ? '<button class="ghost" data-auto>Back to the best order</button>' : ""}</div>`,
+  };
+}
+function stopRow(s) {
+  return `<div class="stop"><div class="time">${minuteText(s.arrive)}</div>
+    <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
+      <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div></div></div>`;
+}
+function orderEditor() {
+  const stops = reorder;
+  return `<div class="card list">${stops.map((s, i) => `<div class="stop">
+      <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
+        <b>${esc(s.rider_name)}</b> · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
+      <div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>
+    </div>`).join("")}</div>
+    <div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`;
+}
+
+// Where a ride stands, in plain words, with a colour.
+const STATUS = {
+  pending: ["New", "new"], proposed: ["Waiting for the caller", "wait"], accepted: ["Taken", "taken"], picked_up: ["On board", "taken"],
+  completed: ["Done", "done"], rejected: ["Declined", "no"], cancelled: ["Cancelled", "no"], no_show: ["No-show", "no"],
+};
+const statusTag = (st) => { const [t, c] = STATUS[st] || [st, "done"]; return `<span class="tag ${c}">${esc(t)}</span>`; };
+
+// The requests: new ones first with "Take it" / "Can't", then every other ride of the day with where it stands.
+function ridesPane() {
+  const reqs = today.requests || [];
+  const others = today.rides || [];
+  const waiting = reqs.filter((r) => r.status === "pending").length;
+  const sub = waiting ? ` <span class="count">${waiting} new</span>` : "";
+  if (!reqs.length && !others.length) return { empty: true, sub, html: '<div class="card"><p class="quiet">No requests yet today. A new one shows here and the phone rings.</p></div>' };
+  return {
+    sub,
+    html: `${reqs.map(requestCard).join("")}${others.length ? `<div class="card list">${others.map(rideRow).join("")}</div>` : ""}`,
+  };
+}
+function rideRow(r) {
+  const finished = ["completed", "rejected", "cancelled", "no_show"].includes(r.status);
+  return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(r.window[0])}</div>
+    <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
+      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div><div class="quiet">${esc(r.from)} → ${esc(r.to)}</div></div></div>`;
 }
 
 function moreView() {
