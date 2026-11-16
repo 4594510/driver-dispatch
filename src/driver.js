@@ -319,6 +319,16 @@ export function todayFor(db, here) {
     }))
     // Higher priority first, then by pickup time.
     .sort((a, b) => b.priority - a.priority || a.window[0] - b.window[0]);
+  // Every other ride of the day with where it stands (taken, on board, done, declined, cancelled, no-show), so the
+  // one main screen shows them all next to the route.
+  const rides = db
+    .prepare("SELECT * FROM bookings WHERE day = ? AND status NOT IN ('pending', 'proposed') ORDER BY pickup_minute, created_at")
+    .all(here.day)
+    .map((b) => ({
+      id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
+      from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
+      return_of: b.return_of,
+    }));
   const manual = db.prepare("SELECT manual FROM routes WHERE day = ?").get(here.day)?.manual;
   return {
     day: here.day,
@@ -326,5 +336,6 @@ export function todayFor(db, here) {
     route: { stops, driveMinutes: route.driveMinutes, estimated: route.estimated, updatedAt: route.updatedAt, manual: !!manual },
     next,
     requests,
+    rides,
   };
 }
