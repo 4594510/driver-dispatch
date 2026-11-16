@@ -39,8 +39,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   From and to (P11/P12, "פון וואו" / "צו וואו"): type the place code, 0 home, # alone says an address, * the list; no key
   asks again; at "say the address" nothing heard goes back to the code question and keys pressed count as a code
   (Shloime, 2026-11-16).
-- A phone not registered hears P02 + P92 and may enter the PIN (env PHONE_PIN, default 2024), then a registered
-  number (P93), and goes on as that phone; nobody calls it back, the booking ends with P94 "call back in a few minutes".
+- A phone not registered hears P02 + P92 and may enter the PIN (env PHONE_PIN, default 2024), then uses the menu as
+  itself (Shloime, 2026-11-16): its rides go to the "guests" family (bookings.js GUEST_HOUSEHOLD) with its own number,
+  nobody calls or texts it back, and a booking ends with P94 "call back in a few minutes". Hearing or cancelling rides:
+  the ones it ordered; when there are none, it enters the number they were ordered from (P93, step rides_number).
 - Breaks the driver plans ahead (driver_breaks; app More > My hours, several a day): no pickup starts inside one;
   the phone says P91 and offers the time the break ends. A break taken right now (status paused) still saves the
   request with P22. The "#" tip (P67) is no longer said.

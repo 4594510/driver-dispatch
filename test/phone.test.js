@@ -61,28 +61,42 @@ test("Yiddish numbers and times", () => {
   assert.ok(Object.keys(PROMPTS).length >= 48);
 });
 
-test("an unregistered number may enter the PIN and a registered number, then goes on as that phone (Shloime, 2026-11-16)", async () => {
+test("a phone not registered hears it may enter the PIN; a wrong one asks again, none ends the call (Shloime, 2026-11-16)", async () => {
   const db = setup();
-  const step = (id, step, keys) => phoneStep(ctx(db), { call_id: id, from: "+18455559999", step, keys });
+  const step = (id, step, keys, from = "+18455559999") => phoneStep(ctx(db), { call_id: id, from, step, keys });
   const r = await step("x", "start", "");
   assert.deepEqual(prompts(r), ["P02", "P92"]);
   assert.equal(r.gather.step, "pin");
   assert.equal((await step("x", "pin", "")).hangup, true, "no PIN: goodbye");
-  const wrong = await step("y", "pin", "1111");
-  assert.deepEqual(prompts(wrong), ["P42", "P92"]);
-  assert.equal((await step("y", "pin_phone", "8455550001")).gather.step, "pin", "no number before the right PIN");
-  const ok = await step("z", "pin", "2024");
-  assert.equal(ok.gather.step, "pin_phone");
-  assert.deepEqual(prompts(await step("z", "pin_phone", "8455551234")), ["P42", "P02", "P93"], "a number not registered");
-  const menu = await step("z", "pin_phone", "8455550001");
-  assert.equal(menu.gather.step, "menu");
-  // Book as that phone; at the end: call back in a few minutes (nobody calls this phone).
-  let res = await step("z", "menu", "1");
-  for (const k of ["1", "0", "20", "1"]) res = await step("z", res.gather.step, k);
+  assert.deepEqual(prompts(await step("y", "pin", "1111")), ["P42", "P92"]);
+  assert.equal((await step("y", "menu", "1")).gather.step, "pin", "no menu before the right PIN");
+  assert.equal((await step("z", "pin", "2024")).gather.step, "menu");
+});
+
+test("with the PIN: a booking ends with 'call back in a few minutes' and queues no calls; rides by the number they were ordered from", async () => {
+  const db = setup();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address, lat, lng) VALUES ('mall', NULL, '30', 'Mall', '9 Mall Rd', 52, -74)").run();
+  const step = (id, step, keys, from = "+18455559999") => phoneStep(ctx(db), { call_id: id, from, step, keys });
+  await step("g", "pin", "2024");
+  let res = await step("g", "menu", "1");
+  for (const k of ["1", "0", "20", "30", "1"]) res = await step("g", res.gather.step, k);
   assert.equal(res.gather.step, "confirm");
-  const done = await step("z", "confirm", "1");
+  const done = await step("g", "confirm", "1");
   assert.equal(prompts(done)[0], "P94");
-  assert.equal(db.prepare("SELECT booked_by_phone FROM bookings").get().booked_by_phone, "+18455550001");
+  const b = db.prepare("SELECT * FROM bookings").get();
+  assert.equal(b.booked_by_phone, "+18455559999");
+  assert.equal(b.household_id, "guests");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM deliveries").get().n, 0, "nobody calls it back");
+  // The same phone calls again: its own ride is read out.
+  await step("g2", "pin", "2024");
+  assert.equal((await step("g2", "menu", "2")).gather.step, "rides_menu");
+  // Another phone not registered, with no rides of its own: enter the number it was ordered from.
+  await step("o", "pin", "2024", "+18455558888");
+  const ask = await step("o", "menu", "2", "+18455558888");
+  assert.equal(ask.gather.step, "rides_number");
+  assert.deepEqual(prompts(ask), ["P93"]);
+  const list = await step("o", "rides_number", "8455559999", "+18455558888");
+  assert.equal(list.gather.step, "rides_menu");
 });
 
 test("booking a ride by phone the short way: from, to, when, and it's read back", async () => {
