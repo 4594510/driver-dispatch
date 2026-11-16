@@ -49,6 +49,19 @@ export function addPlaceLists(db, lists = PLACE_LISTS, log = console.log) {
   undoCodeMoves(db, log);
   fixCodes(db, CODE_FIXES, log);
   unpadCodes(db, log);
+  // A place at house number 100 has code 100 (Shloime, 2026-11-16: "make sure 100 College Rd is 100"), unless its
+  // family already has a 100. Once, so a code changed on purpose later stays.
+  const hundred = "seed:hundred-2026-11-16";
+  const once = !db.prepare("SELECT 1 FROM settings WHERE key = ?").get(hundred);
+  if (once) db.prepare("INSERT INTO settings (key, value) VALUES (?, '{}')").run(hundred);
+  for (const p of once ? db.prepare("SELECT * FROM places WHERE active = 1 AND code != '100'").all() : []) {
+    if (houseNumber(p.address) !== "100") continue;
+    if (p.household_id && db.prepare("SELECT 1 FROM places WHERE active = 1 AND code = '100' AND household_id = ?").get(p.household_id)) continue;
+    db.prepare("UPDATE places SET code = '100' WHERE id = ?").run(p.id);
+    audit(db, "system:list", "place_code_changed", null, { id: p.id, from: p.code, to: "100" });
+    log(`codes: ${p.name} ${p.code} -> 100`);
+  }
+  for (const p of db.prepare("SELECT name, code FROM places WHERE active = 1 AND address LIKE '100 %'").all()) log(`codes: ${p.name} is ${p.code}`);
 }
 
 // 2026-11-15 (Shloime): codes have no leading zero ("01" is 1), and a place whose code was moved off its house number

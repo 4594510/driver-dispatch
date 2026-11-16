@@ -36,8 +36,14 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   line is closed right now. After the pickup place the caller hears "פון <place>", a short pause, then the "to" question
   (and "קיין <place>" before "when"). Times end with אינדערפרי (to noon), נאכמיטאג (to 5 PM), אין אוונט (to 9 PM),
   ביינאכט (2026-11-15). A refused phone booking logs why ("phone booking refused": routed rides, driver spot).
-  From and to (P11/P12): type the place code and #, 0 home, # alone (or no key) says an address, * the list (Shloime,
-  2026-11-12). The "#" tip (P67) is no longer said.
+  From and to (P11/P12, "פון וואו" / "צו וואו"): type the place code, 0 home, # alone says an address, * the list; no key
+  asks again; at "say the address" nothing heard goes back to the code question and keys pressed count as a code
+  (Shloime, 2026-11-16).
+- A phone not registered hears P02 + P92 and may enter the PIN (env PHONE_PIN, default 2024), then a registered
+  number (P93), and goes on as that phone; nobody calls it back, the booking ends with P94 "call back in a few minutes".
+- Breaks the driver plans ahead (driver_breaks; app More > My hours, several a day): no pickup starts inside one;
+  the phone says P91 and offers the time the break ends. A break taken right now (status paused) still saves the
+  request with P22. The "#" tip (P67) is no longer said.
 - A package only (feedback, 2026-11-13): the dashboard's "Just a package" books a ride with no riders (0 men, 0
   women, takes no seats; the name field is a note, "Package: ..."); the driver app shows "Package only". Not on the phone yet.
 - A message to everyone (Shloime, 2026-11-15) is sent from the dashboard (Announcements), the driver app (More, "Send a
@@ -87,11 +93,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   is not reserved any more, 2026-11-15). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P90 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P94 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P90 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P94 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

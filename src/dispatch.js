@@ -5,6 +5,7 @@
 // (so the caller hears right away if there's no room, with the nearest times that fit) and again when the driver
 // accepts, with a before/after preview of what the new ride does to everyone else's times.
 import { audit, nowIso } from "./db.js";
+import { breakAt } from "./schedule.js";
 import { prepareRide, saveRides, getBooking } from "./bookings.js";
 import { localParts, DEFAULT_SETTINGS } from "./rules.js";
 import { DEFAULT_LAYOUT, seatsByStop } from "./seating.js";
@@ -225,6 +226,7 @@ function suggestTimes(db, day, prepared, ctx, settings, now) {
     for (const off of [k * 15, -k * 15]) {
       const m = first.pickup_minute + off;
       if (m < settings.openMinute || m > settings.closeMinute) continue;
+      if (breakAt(settings, m)) continue;
       if (day === here.day && m < here.minute) continue;
       if (prepared[1] && prepared[1].pickup_minute <= m) continue;
       const moved = prepared.map((r, i) => rideOf(withPriority(db, i === 0 ? { ...r, pickup_minute: m } : r)));
@@ -240,7 +242,14 @@ function suggestTimes(db, day, prepared, ctx, settings, now) {
 // { ok: false, errors: [not_registered | ... | too_far | no_time | no_seats], suggestions: [minutes] }.
 export async function bookRide(db, travel, input, now = new Date(), settings = DEFAULT_SETTINGS, actor = null) {
   const prep = prepareRide(db, input, now, settings);
-  if (!prep.ok) return prep;
+  if (!prep.ok) {
+    // Only a planned break is in the way: offer the time it ends (Shloime, 2026-11-16).
+    if (prep.errors?.length === 1 && prep.errors[0] === "driver_break") {
+      const b = breakAt(settings, input.pickupMinute ?? localParts(now, settings.timeZone).minute);
+      if (b && b[1] <= settings.closeMinute) return { ...prep, suggestions: [b[1]] };
+    }
+    return prep;
+  }
   await locate(db, travel, prep.rides);
   const day = prep.rides[0].day;
   const ctx = contextFor(db, travel, settings, day, now);

@@ -258,6 +258,17 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS schedule_changes_days ON schedule_changes (to_day, from_day);
+    -- Breaks the driver plans ahead (Shloime, 2026-11-16): several a day are fine; no pickups start inside one.
+    CREATE TABLE IF NOT EXISTS driver_breaks (
+      id TEXT PRIMARY KEY,
+      day TEXT NOT NULL,                         -- local date
+      start_minute INTEGER NOT NULL,
+      end_minute INTEGER NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS driver_breaks_day ON driver_breaks (day);
     -- Priority levels an admin sets for a family (passenger_id NULL) or one person, always or between two local
     -- times ("2026-11-12T10:00"; NULL = no start or no end). See priority.js.
     CREATE TABLE IF NOT EXISTS priorities (

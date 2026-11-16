@@ -8,6 +8,7 @@ import { notifyBooking, queueReminders, sendDue, callEnded } from "../src/notify
 import { makeWanted } from "../src/phone/audio.js";
 import { getBooking } from "../src/bookings.js";
 import { acceptRide } from "../src/dispatch.js";
+import { getSettings } from "../src/settings.js";
 import { DEFAULT_SETTINGS } from "../src/rules.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -60,11 +61,28 @@ test("Yiddish numbers and times", () => {
   assert.ok(Object.keys(PROMPTS).length >= 48);
 });
 
-test("an unregistered number hears P02 and the call ends", async () => {
+test("an unregistered number may enter the PIN and a registered number, then goes on as that phone (Shloime, 2026-11-16)", async () => {
   const db = setup();
-  const r = await phoneStep(ctx(db), { call_id: "x", from: "+18455559999", step: "start", keys: "" });
-  assert.deepEqual(prompts(r), ["P02"]);
-  assert.equal(r.hangup, true);
+  const step = (id, step, keys) => phoneStep(ctx(db), { call_id: id, from: "+18455559999", step, keys });
+  const r = await step("x", "start", "");
+  assert.deepEqual(prompts(r), ["P02", "P92"]);
+  assert.equal(r.gather.step, "pin");
+  assert.equal((await step("x", "pin", "")).hangup, true, "no PIN: goodbye");
+  const wrong = await step("y", "pin", "1111");
+  assert.deepEqual(prompts(wrong), ["P42", "P92"]);
+  assert.equal((await step("y", "pin_phone", "8455550001")).gather.step, "pin", "no number before the right PIN");
+  const ok = await step("z", "pin", "2024");
+  assert.equal(ok.gather.step, "pin_phone");
+  assert.deepEqual(prompts(await step("z", "pin_phone", "8455551234")), ["P42", "P02", "P93"], "a number not registered");
+  const menu = await step("z", "pin_phone", "8455550001");
+  assert.equal(menu.gather.step, "menu");
+  // Book as that phone; at the end: call back in a few minutes (nobody calls this phone).
+  let res = await step("z", "menu", "1");
+  for (const k of ["1", "0", "20", "1"]) res = await step("z", res.gather.step, k);
+  assert.equal(res.gather.step, "confirm");
+  const done = await step("z", "confirm", "1");
+  assert.equal(prompts(done)[0], "P94");
+  assert.equal(db.prepare("SELECT booked_by_phone FROM bookings").get().booked_by_phone, "+18455550001");
 });
 
 test("booking a ride by phone the short way: from, to, when, and it's read back", async () => {
@@ -374,7 +392,9 @@ test("a one-time address: key 3, said out loud, found on the map, read back in E
   assert.deepEqual(prompts(askAddress), ["P56"]);
   const step = (step, body) => phoneStep(ctx(db, extra), { call_id: "c1", from: "8455550001", step, keys: "", ...body });
   // Nothing understood, then something not on the map: asked again.
-  assert.deepEqual(prompts(await step("from_say", { transcript: "" })), ["P43", "P56"]);
+  // Nothing heard: back to the code question (Shloime, 2026-11-16); # again to say it.
+  assert.deepEqual(prompts(await step("from_say", { transcript: "" })), ["P43", "P11"]);
+  await step("from", { keys: "#" });
   assert.deepEqual(prompts(await step("from_say", { transcript: "blah" })), ["P59", "P56"]);
   const heard = await step("from_say", { transcript: "twelve main street monsey" });
   assert.deepEqual(prompts(heard), ["P57", "P58"]);
@@ -485,12 +505,33 @@ test("from and to: a place code right away, 0 home, # alone (or no key) says an 
   assert.ok(said(list[3]).includes("שול"));
   assert.deepEqual(prompts(list[3]), ["P11"]);
   assert.equal(list[3].gather.step, "from");
-  // # alone, a bare # sent as no digits, or no key at all: say the address.
-  for (const [i, body] of [{ keys: "#" }, { keys: "", terminated_by: "#" }, { keys: "" }].entries()) {
+  // # alone, or a bare # sent as no digits: say the address. No key at all asks again (2026-11-16).
+  for (const [i, body] of [{ keys: "#" }, { keys: "", terminated_by: "#" }].entries()) {
     const a = await call(db, ["1", "1"], { id: `t${i}` });
     const s = await phoneStep(ctx(db), { call_id: `t${i}`, from: "8455550001", step: a.at(-1).gather.step, ...body });
     assert.equal(s.listen?.step, "from_say");
   }
+  const n = await call(db, ["1", "1"], { id: "tn" });
+  const none = await phoneStep(ctx(db), { call_id: "tn", from: "8455550001", step: n.at(-1).gather.step, keys: "" });
+  assert.deepEqual(prompts(none), ["P43", "P11"]);
+  // Keys pressed while it listens for the address count as a place code.
+  await phoneStep(ctx(db), { call_id: "tn", from: "8455550001", step: "from", keys: "#" });
+  const coded = await phoneStep(ctx(db), { call_id: "tn", from: "8455550001", step: "from_say", keys: "20", transcript: "" });
+  assert.equal(coded.gather.step, "to");
+});
+
+test("a planned break: no pickup starts inside it, the caller hears so and is offered the time it ends", async () => {
+  const { addBreak } = await import("../src/schedule.js");
+  const db = setup();
+  const s = getSettings(db, now);
+  assert.ok(addBreak(db, { day: "2026-11-11", startMinute: 600, endMinute: 630 }, "driver:drv1", s, now).ok);
+  assert.ok(addBreak(db, { day: "2026-11-11", startMinute: 780, endMinute: 810 }, "driver:drv1", s, now).ok, "a second break the same day");
+  const r = await call(db, ["1", "1", "0", "20", "1", "1"], { extra: { settings: getSettings(db, now) } });
+  const offer = r.at(-1);
+  assert.equal(offer.gather.step, "offer");
+  assert.deepEqual(prompts(offer).slice(0, 2), ["P91", "P27"]);
+  assert.equal(JSON.parse(db.prepare("SELECT state FROM phone_calls WHERE call_id = 'c1'").get().state).offer, 630, "10:30, when the break ends");
+  assert.ok(said(offer).includes("דרייסיג"));
 });
 
 test("fewer questions: no window and no ride-back question, and no # tip", async () => {

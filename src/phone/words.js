@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P90, some unused) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P94, some unused) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -16,8 +16,8 @@ export const PROMPTS = {
   P08: "וויפיל מענער דארפן די רייד? דריקט די צאל.",
   P09: "וויפיל פרויען דארפן די רייד? דריקט די צאל.",
   P10: "מעגן די מענער און פרויען זיצן צוזאמען? יא, דריקט 1. ניין, דריקט 2.",
-  P11: "לייג אריין די קאוד פונעם פלאץ פון איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
-  P12: "לייג אריין די קאוד פונעם פלאץ צו איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
+  P11: "לייג אריין די קאוד פונעם פלאץ פון וואו איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
+  P12: "לייג אריין די קאוד פונעם פלאץ צו וואו איר ווילט גיין, אדער דרוקט פאונד צו זאגן אן אדרעס.",
   P13: "דריקט דעם קאוד פונעם פלאץ, און דערנאך פאונד.",
   P14: "צו הערן די ליסט פון פלעצער, דריקט 0. צו זאגן א נייע אדרעס, דריקט 1 0 0.",
   P15: "ווען? יעצט, דריקט 1. שפעטער היינט, דריקט 2.",
@@ -108,6 +108,11 @@ export const PROMPTS = {
   P88: "א גוט שבת.",
   P89: "א גוט יום טוב.",
   P90: "א גוט געבענטשט יאר.",
+  // A planned break of the driver; a phone that is not registered enters the PIN (Shloime, 2026-11-16).
+  P91: "דער דרייווער איז נישט אוועילעבל אין יענע צייט.",
+  P92: "אויב איר האט א פין קאוד, לייגט אים אריין יעצט.",
+  P93: "לייגט אריין דעם טעלעפאן נומער פון וואו איר רופט געווענליך, מיט די עריע קאוד.",
+  P94: "אייער רייד איז געשיקט געווארן צום דרייווער. רופט צוריק אין א פאר מינוט צו הערן אויב עס איז קאנפירמט.",
 };
 
 // Small words between pieces, recorded once like the numbers.

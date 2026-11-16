@@ -64,7 +64,7 @@ export async function phoneStep(ctx, body) {
   // A name in English letters (a saved address like "Town Square Mall") is said in English; Yiddish ones in Yiddish.
   const name = (row) => row && !row.recording && !row.spoken && /[A-Za-z]/.test(row.name) && !/[\u0590-\u05FF]/.test(row.name)
     ? { say: row.name, language: "english" } : namePiece(db, ctx.base, row);
-  const c = { ...ctx, call, st, keys, step, from, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name };
+  const c = { ...ctx, call, st, keys, step, from, hash: skipped, transcript: body.transcript ?? null, say: (t) => piece(db, ctx.base, t), name };
   const res = call.delivery_id ? await outbound(c) : await inbound(c);
   db.prepare("UPDATE phone_calls SET state = ?, updated_at = ? WHERE call_id = ?").run(JSON.stringify(st), nowIso(), callId);
   // Goodbye: yasher koach, the wish of the day and of the season (greeting.js) instead of the plain P41.
@@ -178,10 +178,35 @@ function messagesSpeech(c) {
 // ---------- incoming ----------
 const MENU = [P("P04")];
 
+// A phone that is not registered may enter the PIN (PHONE_PIN, 2024 for now) and then the number of a registered phone,
+// and goes on as that phone (Shloime, 2026-11-16). Nobody calls this phone back: at the end it hears to call again.
+const phonePin = () => String(process.env.PHONE_PIN || "2024");
+function unregistered(c) {
+  if (c.step === "pin") {
+    if (c.keys && c.keys === phonePin()) {
+      settle(c, "pin");
+      c.st.pinOk = true;
+      return ask("pin_phone", [P("P93")], 10);
+    }
+    if (!c.keys) return end([]);
+    return retry(c, "pin", [P("P92")], 4);
+  }
+  if (c.step === "pin_phone" && c.st.pinOk) {
+    const number = normalize(c.keys);
+    const phone = number && approvedPhone(c.db, number);
+    if (!phone) return retry(c, "pin_phone", [P("P02"), P("P93")], 10);
+    c.st.as = phone.number;
+    audit(c.db, `phone:${c.from}`, "pin_signed_in", null, { as: phone.number });
+    return ask("menu", MENU);
+  }
+  return ask("pin", [QUIET, P("P02"), P("P92")], 4);
+}
+
 async function inbound(c) {
-  const phone = approvedPhone(c.db, c.from);
-  if (!phone) return { play: [P("P02")], hangup: true };
+  const phone = approvedPhone(c.db, c.st.as || c.from);
+  if (!phone) return unregistered(c);
   c.phone = phone;
+  c.guest = !!c.st.as;
   const handler = Object.hasOwn(STEPS, c.step) ? STEPS[c.step] : STEPS.start;
   // A question about a ride being ordered, but no ride is being ordered (it was just booked, or dropped): the menu.
   if (DRAFT_STEPS.has(c.step) && !c.st.draft) return ask("menu", MENU);
@@ -369,7 +394,7 @@ function readBack(c) {
 
 const REFUSALS = {
   no_seats: "P23", no_time: "P23", too_far: "P26", in_past: "P24", not_today: "P24", return_before_pickup: "P24",
-  not_registered: "P02",
+  not_registered: "P02", driver_break: "P91",
 };
 // Refusals about the hours say today's hours.
 const HOURS_REFUSALS = ["closed", "outside_hours", "return_outside_hours"];
@@ -401,7 +426,8 @@ async function bookOnce(c) {
   const r = await bookRide(c.db, c.travel, input, c.now, c.settings, `phone:${c.phone.number}`);
   if (r.ok) {
     for (const b of r.bookings) c.notify?.(b, "booked");
-    return { booked: true, res: end([P(driverAvailable(c.db, c.now) ? "P21" : "P22")]) };
+    // From a phone that entered the PIN: nobody calls it back, so it hears to call again in a few minutes.
+    return { booked: true, res: end([P(c.guest ? "P94" : driverAvailable(c.db, c.now) ? "P21" : "P22")]) };
   }
   console.log(`phone booking refused ..${String(c.from).slice(-4)}: ${r.errors.join(",")}${r.why ? ` ${JSON.stringify(r.why)}` : ""} offered=${JSON.stringify(r.suggestions || [])}`);
   const refusal = refusalOf(c, r.errors[0]);
@@ -702,8 +728,10 @@ const STEPS = {
   },
 };
 
-function pickPlace(c, which, next) {
-  if (c.keys === "") return listen(`${which}_say`, [P("P56")]); // # alone or no key: say the address
+function pickPlace(c, which, next, code = c.keys) {
+  c = code === c.keys ? c : { ...c, keys: code };
+  // # alone: say the address. No key at all asks again (a slow caller is not sent to "say the address").
+  if (c.keys === "") return c.hash ? listen(`${which}_say`, [P("P56")]) : retry(c, which, Q[which]());
   if (c.keys === "*") return ask(which, [placeList(c), Q[which]()]);
   if (c.keys === "0") {
     const home = homeOf(c);
@@ -734,6 +762,17 @@ async function heardAddress(c, which) {
     }
     return listen(`${which}_say`, [why, P("P56")]);
   };
+  // Keys pressed, or digits heard, at "say the address": a place code after all (Shloime, 2026-11-16).
+  const digits = /^\d{1,6}$/.test(c.keys) ? c.keys : /^\d{1,6}$/.test(text.replace(/[\s.,-]/g, "")) ? text.replace(/[\s.,-]/g, "") : null;
+  if (digits && which !== "add") {
+    settle(c, `${which}_say`);
+    return pickPlace(c, which, which === "from" ? "to" : "when", digits);
+  }
+  // Nothing heard (or * pressed): back to the code question, not "say it again".
+  if (!text && which !== "add") {
+    settle(c, `${which}_say`);
+    return retry(c, which, Q[which]());
+  }
   if (!text) return again(P("P43"));
   const found = c.travel.lookup ? await c.travel.lookup(text) : { status: "unknown" };
   if (found.status === "not_found" || found.km > AREA_KM) return again(P("P59"));

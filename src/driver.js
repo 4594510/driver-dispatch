@@ -13,7 +13,7 @@ import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute } from "./
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
 import { getSettings } from "./settings.js";
-import { scheduleView, addChange, removeChange, dayHours } from "./schedule.js";
+import { scheduleView, addChange, removeChange, dayHours, addBreak, removeBreak } from "./schedule.js";
 import { priorityOf } from "./priority.js";
 
 const priorityFields = (db, b) => {
@@ -187,6 +187,9 @@ export function driverRouter(db, ctxFor, appRelease = () => null) {
   r.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), ctxFor().now)));
   r.post("/schedule", once(async (req) => addChange(db, req.body, req.actor, getSettings(db), ctxFor().now)));
   r.post("/schedule/:id/remove", once(async (req) => removeChange(db, req.params.id, req.actor)));
+  // Breaks planned ahead, several a day (Shloime, 2026-11-16).
+  r.post("/breaks", once(async (req) => addBreak(db, req.body, req.actor, getSettings(db), ctxFor().now)));
+  r.post("/breaks/:id/remove", once(async (req) => removeBreak(db, req.params.id, req.actor)));
 
   r.post("/status", once(async (req) => {
     const c = ctxFor();

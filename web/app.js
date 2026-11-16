@@ -22,7 +22,7 @@ async function api(path, opts = {}) {
 
 const ERRORS = {
   not_registered: "That phone number isn't approved", not_today: "Only same-day rides", outside_hours: "Outside service hours",
-  in_past: "That time already passed", bad_window: "Choose a 15 or 30 minute window", no_seats: "No fitting seats at that time",
+  in_past: "That time already passed", driver_break: "The driver is on a planned break then", bad_window: "Choose a 15 or 30 minute window", no_seats: "No fitting seats at that time",
   no_riders: "Enter how many men and women", no_pickup: "Choose a pickup place", no_dropoff: "Choose a destination",
   return_before_pickup: "The return must be after the pickup", return_outside_hours: "The return is outside service hours",
   wrong_status: "Not possible in this ride's status", not_pending: "This ride isn't waiting for an answer",
