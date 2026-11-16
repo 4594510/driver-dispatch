@@ -5,7 +5,7 @@
 // Where the caller is (the ride being ordered, the list just read out) is kept per call in phone_calls.
 import { greetingPrompt, farewellPrompts } from "./greeting.js";
 import { nowIso, audit } from "../db.js";
-import { approvedPhone, changeStatus, getBooking } from "../bookings.js";
+import { approvedPhone, guestPhone, changeStatus, getBooking } from "../bookings.js";
 import { bookRide, acceptRide, refreshDay } from "../dispatch.js";
 import { keypadTime, localParts, canChangePickup } from "../rules.js";
 import { W, numberWords, timePieces, dayPieces } from "./words.js";
@@ -178,35 +178,29 @@ function messagesSpeech(c) {
 // ---------- incoming ----------
 const MENU = [P("P04")];
 
-// A phone that is not registered may enter the PIN (PHONE_PIN, 2024 for now) and then the number of a registered phone,
-// and goes on as that phone (Shloime, 2026-11-16). Nobody calls this phone back: at the end it hears to call again.
+// A phone that is not registered may order with the PIN (PHONE_PIN, 2024 for now; Shloime, 2026-11-16). Its rides
+// belong to the guests family; nobody calls it back, so a booking ends with "call back in a few minutes" (P94). To hear
+// rides, it gets the ones it ordered, or when there are none, enters the number they were ordered from (P93).
 const phonePin = () => String(process.env.PHONE_PIN || "2024");
 function unregistered(c) {
   if (c.step === "pin") {
     if (c.keys && c.keys === phonePin()) {
       settle(c, "pin");
-      c.st.pinOk = true;
-      return ask("pin_phone", [P("P93")], 10);
+      c.st.guest = true;
+      audit(c.db, `phone:${c.from}`, "pin_signed_in");
+      return ask("menu", MENU);
     }
     if (!c.keys) return end([]);
     return retry(c, "pin", [P("P92")], 4);
-  }
-  if (c.step === "pin_phone" && c.st.pinOk) {
-    const number = normalize(c.keys);
-    const phone = number && approvedPhone(c.db, number);
-    if (!phone) return retry(c, "pin_phone", [P("P02"), P("P93")], 10);
-    c.st.as = phone.number;
-    audit(c.db, `phone:${c.from}`, "pin_signed_in", null, { as: phone.number });
-    return ask("menu", MENU);
   }
   return ask("pin", [QUIET, P("P02"), P("P92")], 4);
 }
 
 async function inbound(c) {
-  const phone = approvedPhone(c.db, c.st.as || c.from);
+  const phone = approvedPhone(c.db, c.from) || (c.st.guest ? guestPhone(c.db, c.from) : null);
   if (!phone) return unregistered(c);
   c.phone = phone;
-  c.guest = !!c.st.as;
+  c.guest = !!phone.guest;
   const handler = Object.hasOwn(STEPS, c.step) ? STEPS[c.step] : STEPS.start;
   // A question about a ride being ordered, but no ride is being ordered (it was just booked, or dropped): the menu.
   if (DRAFT_STEPS.has(c.step) && !c.st.draft) return ask("menu", MENU);
@@ -219,8 +213,17 @@ const DRAFT_STEPS = new Set(["who", "who_pick", "with", "extra", "extra_men", "e
 const today = (c) => localParts(c.now, c.settings.timeZone);
 
 function ridesToday(c, statuses) {
+  const ins = statuses.map(() => "?").join(",");
+  if (c.guest) {
+    // The rides this phone ordered, or those of the number the caller entered (its family's, when it is registered).
+    const number = c.st.lookup || c.phone.number;
+    const family = c.st.lookup ? approvedPhone(c.db, number)?.household_id ?? "-" : "-";
+    return c.db
+      .prepare(`SELECT * FROM bookings WHERE day = ? AND (booked_by_phone = ? OR household_id = ?) AND status IN (${ins}) ORDER BY pickup_minute`)
+      .all(today(c).day, number, family, ...statuses);
+  }
   return c.db
-    .prepare(`SELECT * FROM bookings WHERE day = ? AND household_id = ? AND status IN (${statuses.map(() => "?").join(",")}) ORDER BY pickup_minute`)
+    .prepare(`SELECT * FROM bookings WHERE day = ? AND household_id = ? AND status IN (${ins}) ORDER BY pickup_minute`)
     .all(today(c).day, c.phone.household_id, ...statuses);
 }
 function rideItems(c, b, i) {
@@ -418,7 +421,7 @@ async function book(c) {
 async function bookOnce(c) {
   const d = c.st.draft;
   const input = {
-    phone: c.phone.number, passengerId: d.passengerId || null, riderName: "", riders: namedIds(d), men: d.men, women: d.women,
+    phone: c.phone.number, guest: !!c.guest, passengerId: d.passengerId || null, riderName: "", riders: namedIds(d), men: d.men, women: d.women,
     together: !!d.together, package: !!d.package,
     pickup: d.from ? { placeId: d.from } : d.fromAddress, dropoff: d.to ? { placeId: d.to } : d.toAddress, pickupMinute: d.pickupMinute ?? null, window: d.window,
     returnMinute: d.returnMinute ?? undefined,
@@ -439,6 +442,13 @@ async function bookOnce(c) {
 }
 
 const STEPS = {
+  rides_number(c) {
+    const number = normalize(c.keys);
+    if (!number || !c.guest) return retry(c, "rides_number", [P("P93")], 10);
+    settle(c, "rides_number");
+    c.st.lookup = number;
+    return c.st.after === "cancel" ? cancelList(c) : myRides(c);
+  },
   start(c) {
     c.st.tries = {};
     const waiting = c.db
@@ -859,14 +869,21 @@ function setPlace(c, which, place, next) {
   return ask(next, [c.say(which === "from" ? W.from : W.to), c.name(place), { pause: 700 }, Q[next]()]);
 }
 
+// A phone with the PIN and no rides of its own: which number were they ordered from?
+function askNumber(c, then) {
+  c.st.after = then;
+  return ask("rides_number", [P("P93")], 10);
+}
 function myRides(c) {
   const list = ridesToday(c, ACTIVE);
+  if (c.guest && !list.length && !c.st.lookup) return askNumber(c, "rides");
   c.st.list = list.map((b) => b.id);
   if (!list.length) return ask("menu", [P("P28"), MENU]);
   return ask("rides_menu", [list.map((b, i) => rideItems(c, b, i)), P("P35")]);
 }
 function cancelList(c) {
   const list = ridesToday(c, CANCELLABLE);
+  if (c.guest && !list.length && !c.st.lookup) return askNumber(c, "cancel");
   c.st.list = list.map((b) => b.id);
   if (!list.length) return ask("menu", [P("P28"), MENU]);
   return ask("cancel_which", [list.map((b, i) => rideItems(c, b, i)), P("P32")], list.length > 9 ? 2 : 1);

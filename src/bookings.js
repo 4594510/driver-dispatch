@@ -9,6 +9,16 @@ import { seatPeople, peopleForFamily } from "./relations.js";
 
 const HOLDING = ["accepted", "proposed", "picked_up"];
 
+// Rides ordered with the PIN from a phone that is not registered (Shloime, 2026-11-16) belong to this family, made
+// when first needed; booked_by_phone is the caller's own number, which gets no calls or texts back.
+export const GUEST_HOUSEHOLD = "guests";
+export function guestPhone(db, number) {
+  if (!db.prepare("SELECT 1 FROM households WHERE id = ?").get(GUEST_HOUSEHOLD)) {
+    db.prepare("INSERT INTO households (id, name, created_at) VALUES (?, ?, ?)").run(GUEST_HOUSEHOLD, "Guests (phoned with the PIN)", new Date().toISOString());
+  }
+  return { number, household_id: GUEST_HOUSEHOLD, passenger_id: null, guest: true };
+}
+
 export function approvedPhone(db, number) {
   return db.prepare("SELECT * FROM phones WHERE number = ? AND active = 1").get(number) || null;
 }
@@ -53,7 +63,7 @@ export function seatCheck(db, day, candidates, settings = DEFAULT_SETTINGS, layo
 //   window, returnMinute? }
 // Returns { ok: true, rides: [...], phone } or { ok: false, errors: [...] }.
 export function prepareRide(db, input, now = new Date(), settings = DEFAULT_SETTINGS) {
-  const phone = approvedPhone(db, input.phone);
+  const phone = approvedPhone(db, input.phone) || (input.guest ? guestPhone(db, input.phone) : null);
   if (!phone) return { ok: false, errors: ["not_registered"] };
 
   const day = localParts(now, settings.timeZone).day;
