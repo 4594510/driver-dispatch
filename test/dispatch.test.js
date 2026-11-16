@@ -158,22 +158,44 @@ test("seats that don't fit the rules: the request still reaches the driver, who 
   assert.equal((await refreshDay(db, travel, day, settings, now)).ok, true);
 });
 
-test("two rides accepted at the same moment both end up on the route, or the second is refused", async () => {
+test("two rides accepted at the same moment both end up on the route, one after the other", async () => {
   const db = setup();
   const travel = fakeTravel();
-  // Two full vans for the same time: only one can go.
+  // Two full vans for the same time: the driver may take both, the second one late (it waits for the first).
   const a = await bookRide(db, travel, ask({ men: 7 }), now, settings);
   const b = await bookRide(db, travel, ask({ men: 7 }), now, settings);
   assert.ok(a.ok && b.ok);
   const out = await Promise.all([a, b].map((r) => acceptRide(db, travel, r.bookings[0].id, "drv1", settings, now)));
-  assert.deepEqual(out.map((o) => o.ok).sort(), [false, true]);
-  assert.equal(dayRoute(db, day).stops.length, 2);
+  assert.deepEqual(out.map((o) => o.ok), [true, true]);
+  const full = dayRoute(db, day).stops;
+  assert.equal(full.length, 4);
+  assert.deepEqual(full.map((s) => s.kind), ["pickup", "dropoff", "pickup", "dropoff"]);
   // Two small rides at once: both are on the route.
   const c = await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings);
   const d = await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings);
   const both = await Promise.all([c, d].map((r) => acceptRide(db, travel, r.bookings[0].id, "drv1", settings, now)));
   assert.deepEqual(both.map((o) => o.ok), [true, true]);
-  assert.equal(dayRoute(db, day).stops.length, 6);
+  assert.equal(dayRoute(db, day).stops.length, 8);
+});
+
+test("the driver may take a ride he'd reach after its window: the preview shows the asked time and the GPS time, nobody else moves", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  const a = (await bookRide(db, travel, ask({ men: 7 }), now, settings)).bookings[0];
+  const b = (await bookRide(db, travel, ask({ men: 7 }), now, settings)).bookings[0];
+  assert.ok((await acceptRide(db, travel, a.id, "drv1", settings, now)).ok);
+  const etaA = getBooking(db, a.id).eta_minute;
+  const p = await previewAccept(db, travel, b.id, settings, now);
+  assert.ok(p.ok, JSON.stringify(p));
+  assert.equal(p.asked, b.pickup_minute);
+  assert.ok(p.eta > b.pickup_minute + b.window_minutes, "the real (later) time");
+  assert.deepEqual(p.shifts, {}, "the ride already taken keeps its time");
+  assert.ok((await acceptRide(db, travel, b.id, "drv1", settings, now)).ok);
+  assert.equal(getBooking(db, b.id).eta_minute, p.eta, "the caller is told the real time");
+  assert.equal(getBooking(db, a.id).eta_minute, etaA);
+  // An on-time ride shows no asked time.
+  const c = (await bookRide(db, travel, ask({ pickupMinute: 15 * 60 }), now, settings)).bookings[0];
+  assert.equal((await previewAccept(db, travel, c.id, settings, now)).asked, undefined);
 });
 
 test("a package rides along on the route with no seats", async () => {

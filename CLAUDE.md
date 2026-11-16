@@ -33,8 +33,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   to Yom Kippur P81 (גמר חתימה טובה), to Hoshana Rabba P84 (גמר חותם חיים), Hoshana Rabba P85 (א גוט קוויטל). Chol Hamoed incl. Hoshana Rabba and erev the last days of Pesach greets P77 (א גוטן מועד). A second
   of quiet before the greeting. Each question is the gather's own prompt (keys pressed during a separate play reach
   Teltech's next gather one digit at a time). Asking for "now" outside the hours goes back to the menu. Today's hours are said at the start only when changed today or the
-  line is closed right now. After the pickup place the caller hears "פון <place>", a short pause, then the "to" question
-  (and "קיין <place>" before "when"). Times end with אינדערפרי (to noon), נאכמיטאג (to 5 PM), אין אוונט (to 9 PM),
+  line is closed right now. After the pickup place (and after "to") the caller hears P95 "גוט, באקומען." and the next question
+  at once; places are said only in the read-back (Shloime, 2026-11-16: it was slow). A place code as long as the longest
+  code goes in at once, a shorter one after 1.5 s with no key or at once with # (ivr.js fitCodeKeys). Times end with אינדערפרי (to noon), נאכמיטאג (to 5 PM), אין אוונט (to 9 PM),
   ביינאכט (2026-11-15). A refused phone booking logs why ("phone booking refused": routed rides, driver spot).
   From and to (P11/P12, "פון וואו" / "צו וואו"): type the place code, 0 home, # alone says an address, * the list; no key
   asks again; at "say the address" nothing heard goes back to the code question and keys pressed count as a code
@@ -52,6 +53,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   message to everyone"), or by texting the line from a number on the dashboard's "Who may send by text" list
   (message_senders; Teltech posts it to /fonory/text, field names not final). Text phones get a text, call phones a call
   that reads it out; the texter gets "Sent to everyone (N phones)" back. At most 500 letters.
+- The driver may take a ride that GPS says he'll reach after its window (Shloime, 2026-11-16, "accept as is"): the
+  app shows the asked time and the GPS time, nobody else gets later (route.js insertRide lateOk, only for the driver's
+  accept), and the caller's "accepted" message gives the real time. Phone bookings still offer the nearest time that fits.
 - A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
@@ -95,11 +99,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   is not reserved any more, 2026-11-15). Two
   places may share a code: a caller's own family's place wins, else the caller hears the names and picks (codeMatches,
   <which>_choose); only one family can't repeat its own code. src/seed.js: place lists Shloime gave, added once at startup.
-- src/phone/words.js: the prompt script P01-P94 (must match the doc's Recording script), Yiddish numbers, times, texts.
+- src/phone/words.js: the prompt script P01-P95 (must match the doc's Recording script), Yiddish numbers, times, texts.
 - src/phone/audio.js: spoken pieces (clips table): a saved recording, else Fonory's voice says it and we record it.
 - src/phone/fonory.js: webhook check (Teltech's X-Fonory-Key + their IP), Teltech's Ride Line request/answer format
   (readStep, toActions; https://ivr.teltech.info/developers/api-box/ride-line/), the outgoing call/text client
-  (planned on their side, field names not final). prompts/: P01-P94 at 8 kHz, served at /prompts/ for Fonory to play.
+  (planned on their side, field names not final). prompts/: P01-P95 at 8 kHz, served at /prompts/ for Fonory to play.
 - src/phone/yiddishtools.js, scripts/make-recordings.mjs: the Yiddish Tools voice and the prompt files for Fonory.
 - src/notify.js: messages to callers (booked, accepted, not taken, time change, reminder, late, cancelled), sent by
   Fonory, calls retried for reminders and time changes.

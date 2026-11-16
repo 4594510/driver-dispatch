@@ -107,8 +107,11 @@ test("booking a ride by phone the short way: from, to, when, and it's read back"
   assert.deepEqual(prompts(r[0]), ["P76", "P04"]);
   assert.deepEqual(prompts(r[1]), ["P06"]);
   assert.deepEqual(prompts(r[2]), ["P11"]);
-  assert.equal(r[2].gather.max_keys, 6, "a place code is typed right away");
-  assert.deepEqual(prompts(r[3]), ["P12"]);
+  const longest = db.prepare("SELECT max(length(code)) AS n FROM places WHERE active = 1").get().n;
+  assert.equal(r[2].gather.max_keys, longest, "a code as long as the longest one goes in at once");
+  assert.equal(r[2].gather.digit_ms, 1500, "a shorter one after a second and a half");
+  assert.deepEqual(prompts(r[3]), ["P95", "P12"], "a short recorded 'got it', then 'to'");
+  assert.deepEqual(said(r[3]), [], "the place isn't read back here (that was slow)");
   assert.deepEqual(prompts(r[6]), ["P19", "P20"], "no ride-back question: straight to the read-back");
   assert.deepEqual(said(r[6]), ["משה", "פון", "שטוב", "קיין", "שול", "אום", "צוועלף", "נאכמיטאג"]);
   const done = r[7];
@@ -758,14 +761,16 @@ test("a question about a ride when no ride is being ordered goes to the menu", a
   }
 });
 
-test("after the pickup place the caller hears it back, a pause, then 'to'; the hours at the start only when changed or closed now", async () => {
+test("after the pickup place the caller hears a short 'got it' and 'to' at once; the hours at the start only when changed or closed now", async () => {
   const db = setup();
   const r = await call(db, ["1", "1", "20"]);
   const last = r.at(-1);
   assert.equal(last.gather.step, "to");
-  assert.deepEqual(said(last).slice(0, 2), ["פון", "שול"]);
-  assert.ok(last.play.some((p) => p.pause), "a short pause before the next question");
-  assert.deepEqual(prompts(last), ["P12"]);
+  assert.deepEqual(said(last), []);
+  assert.ok(!last.play.some((p) => p.pause), "no pause");
+  assert.deepEqual(prompts(last), ["P95", "P12"]);
+  const next = await phoneStep(ctx(db), { call_id: "c1", from: "8455550001", step: "to", keys: "0" });
+  assert.deepEqual(prompts(next).slice(0, 1), ["P95"], "and after 'to' before 'when'");
   const open = await phoneStep(ctx(db), { call_id: "h1", from: "8455550001", step: "start", keys: "" });
   assert.ok(!prompts(open).includes("P48"), "open as usual: no hours");
   const late = await phoneStep(ctx(db, { now: new Date("2026-11-12T01:00:00Z") }), { call_id: "h2", from: "8455550001", step: "start", keys: "" });

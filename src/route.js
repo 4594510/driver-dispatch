@@ -125,10 +125,13 @@ function cost(timing, stops, rides) {
 }
 
 // Insert one ride into a route. Returns { ok, stops, timing, seats } or { ok: false, reason: "no_time" | "no_seats" }.
-export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT) {
+// opts.lateOk: the new ride itself may be reached after its window (the driver takes it as it is and the caller hears
+// the real time, Shloime 2026-11-16); nobody else may get later. Each late minute counts heavily, so an on-time place
+// still wins.
+export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT, opts = {}) {
   const all = [...rides.filter((r) => r.id !== ride.id), ride];
   const before = timeRoute(stops, rides, ctx);
-  const allow = { late: before.late, over: before.over };
+  const allow = { late: opts.lateOk ? { ...before.late, [ride.id]: Infinity } : before.late, over: before.over };
   const candidates = [];
   const n = stops.length;
   for (let i = 0; i <= n; i++) {
@@ -136,7 +139,7 @@ export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT) {
       const next = [...stops.slice(0, i), { ride: ride.id, kind: "pickup" }, ...stops.slice(i, j), { ride: ride.id, kind: "dropoff" }, ...stops.slice(j)];
       const timing = timeRoute(next, all, ctx);
       if (!withinAllowance(timing, allow)) continue;
-      candidates.push({ stops: next, timing, cost: cost(timing, next, all) });
+      candidates.push({ stops: next, timing, cost: cost(timing, next, all) + 10 * (timing.late[ride.id] || 0) });
     }
   }
   if (!candidates.length) return { ok: false, reason: "no_time" };
@@ -182,13 +185,14 @@ export function buildRoute(rides, ctx, layout = DEFAULT_LAYOUT) {
 
 // Fit new rides into a day: first into the existing order, else by rebuilding the whole day.
 // rides: the rides already in the route; stops: their current order (stops of rides not in `rides` are dropped).
-export function fitRides(stops, rides, newRides, ctx, layout = DEFAULT_LAYOUT) {
+// opts.lateOk: see insertRide.
+export function fitRides(stops, rides, newRides, ctx, layout = DEFAULT_LAYOUT, opts = {}) {
   const ids = new Set(rides.map((r) => r.id));
   let cur = stops.filter((s) => ids.has(s.ride));
   let placed = [...rides];
   let firstFail = null;
   for (const r of newRides) {
-    const res = insertRide(cur, placed, r, ctx, layout);
+    const res = insertRide(cur, placed, r, ctx, layout, opts);
     if (!res.ok) {
       firstFail = res.reason;
       break;

@@ -72,7 +72,7 @@ export async function phoneStep(ctx, body) {
     const bye = farewellPrompts(c.now, c.settings.timeZone).map(P);
     res.play = [res.play].flat(Infinity).flatMap((p) => (p?.prompt === "P41" ? bye : [p]));
   }
-  return clean(res);
+  return clean(fitCodeKeys(db, res));
 }
 
 function normalize(s) {
@@ -80,6 +80,15 @@ function normalize(s) {
   if (d.length === 10) return `+1${d}`;
   if (d.length === 11 && d.startsWith("1")) return `+${d}`;
   return null;
+}
+// Place-code questions: a code as long as the longest one goes in the moment it's typed; a shorter one after 1.5
+// seconds with no key (25 may still become 250), or at once with # (Shloime, 2026-11-16).
+const CODE_WAIT_MS = 1500;
+function fitCodeKeys(db, res) {
+  const g = res.gather;
+  if (!g || g.max_keys !== CODE_KEYS) return res;
+  const longest = db.prepare("SELECT max(length(code)) AS n FROM places WHERE active = 1").get()?.n || 1;
+  return { ...res, gather: { ...g, max_keys: Math.max(1, Math.min(CODE_KEYS, longest)), digit_ms: CODE_WAIT_MS } };
 }
 const clean = (res) => ({ ...res, play: (res.play || []).flat(Infinity).filter(Boolean), hangup: !!res.hangup });
 const ask = (step, play, maxKeys = STEP_KEYS[step] || 1) =>
@@ -864,9 +873,9 @@ function setPlace(c, which, place, next) {
   c.st.draft[which] = place.id;
   c.st.draft[`${which}Address`] = null;
   if (c.st.draft.editing) return onward(c, next);
-  // Say the place back ("from the shul"), a short pause, then the next question, so "from" and "to" don't run
-  // together (Shloime, 2026-11-15).
-  return ask(next, [c.say(which === "from" ? W.from : W.to), c.name(place), { pause: 700 }, Q[next]()]);
+  // A short recorded "got it" and the next question right away (Shloime, 2026-11-16: reading the place back took too
+  // long). The place is said in the read-back at the end.
+  return ask(next, [P("P95"), Q[next]()]);
 }
 
 // A phone with the PIN and no rides of its own: which number were they ordered from?
