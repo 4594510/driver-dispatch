@@ -96,6 +96,13 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   the offered time, goes to P70 (change something; 0 back to the read-back) instead of hanging up; "closed" goes to the
   menu; more than 7 people asks the count again.
 
+- Driver feedback (2026-11-16, second batch): every ride shows who called (driver.js callerOf: the phone's person or
+  family and number); each route stop and taken ride has its own Picked up / Done / Dropped off, and Remove (the driver
+  may cancel a ride he took; the caller is told); an on-board ride shows its drop-off time; times are picked from an hour
+  list with AM/PM and a minutes list (no phone time box); a changed day has "Back to the usual hours"; an open app page
+  reloads itself when the server has a newer one (/today web). Phone: * at the read-back says it again; once today's
+  rides started, the hours say only "until" (W.ridesUntil).
+
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
 - Tests: `npm test` (node:test). Keep every rule covered by a test.
