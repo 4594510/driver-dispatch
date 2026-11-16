@@ -15,6 +15,11 @@
 import { planSeats, DEFAULT_LAYOUT, capacity } from "./seating.js";
 
 const EPS = 0.01;
+// A rider already on the route was told a pickup time. Putting a new ride in front of them (two requests for the same
+// time: the driver can't be at both places at once) costs this much per minute they are pushed later (twenty times a
+// minute of the new rider waiting, twice a minute of driving), so a new ride goes after the ones already promised when
+// its window allows.
+const PUSH_WEIGHT = 2;
 
 // ctx: { minutes(a, b, departMinute) -> { minutes, estimated }, stopMinutes, maxTrip, start?: { at, minute } }
 export function timeRoute(stops, rides, ctx) {
@@ -131,6 +136,7 @@ function cost(timing, stops, rides) {
 export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT, opts = {}) {
   const all = [...rides.filter((r) => r.id !== ride.id), ride];
   const before = timeRoute(stops, rides, ctx);
+  const was = etas(stops, before);
   const allow = { late: opts.lateOk ? { ...before.late, [ride.id]: Infinity } : before.late, over: before.over };
   const candidates = [];
   const n = stops.length;
@@ -139,7 +145,7 @@ export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT, opt
       const next = [...stops.slice(0, i), { ride: ride.id, kind: "pickup" }, ...stops.slice(i, j), { ride: ride.id, kind: "dropoff" }, ...stops.slice(j)];
       const timing = timeRoute(next, all, ctx);
       if (!withinAllowance(timing, allow)) continue;
-      candidates.push({ stops: next, timing, cost: cost(timing, next, all) + 10 * (timing.late[ride.id] || 0) });
+      candidates.push({ stops: next, timing, cost: cost(timing, next, all) + 10 * (timing.late[ride.id] || 0) + PUSH_WEIGHT * pushed(was, next, timing) });
     }
   }
   if (!candidates.length) return { ok: false, reason: "no_time" };
@@ -149,6 +155,15 @@ export function insertRide(stops, rides, ride, ctx, layout = DEFAULT_LAYOUT, opt
     if (seats.ok) return { ok: true, stops: c.stops, timing: c.timing, seats: seats.plan };
   }
   return { ok: false, reason: "no_seats" };
+}
+
+// Minutes the pickups already on the route move later on a new timing (the ones on board have no pickup left).
+function pushed(was, stops, timing) {
+  let m = 0;
+  stops.forEach((s, i) => {
+    if (s.kind === "pickup" && was[s.ride]?.pickup != null) m += Math.max(0, timing.times[i].arrive - was[s.ride].pickup);
+  });
+  return m;
 }
 
 // Build a day's route from nothing: riders on board first (their drop-offs), then everyone else in pickup-time order

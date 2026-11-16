@@ -15,7 +15,10 @@ export async function rideAction(ctx, id, action, body, actor, driverId) {
   if (!was) return { ok: false, errors: ["not_found"] };
   if (action === "accept") {
     const r = await acceptRide(db, travel, id, driverId, settings, now, { override: !!body?.override });
-    if (r.ok) notify(r.booking, "accepted");
+    if (r.ok) {
+      notify(r.booking, "accepted");
+      tellMoved(ctx, r.moved || []);
+    }
     return r;
   }
   if (action === "propose") {
@@ -66,4 +69,19 @@ export function tellLate(ctx, day) {
     AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.booking_id = b.id AND d.kind = 'late')`).all(day, LATE_MARGIN);
   for (const b of rows) notify(b, "late", { minute: b.eta_minute });
   return rows.length;
+}
+
+// Riders already taken whose pickup a newly taken ride pushed later (two requests for the same time: the driver goes to
+// one place, then the other). Their "accepted" text not sent yet gets the new time; otherwise they hear it (P45).
+export function tellMoved(ctx, bookings) {
+  const { db, notify } = ctx;
+  for (const b of bookings) {
+    const waiting = db.prepare("SELECT id FROM deliveries WHERE booking_id = ? AND kind = 'accepted' AND status = 'queued'").all(b.id);
+    if (waiting.length) {
+      // The call reads the time when it goes out; the text is written again.
+      db.prepare("DELETE FROM deliveries WHERE booking_id = ? AND kind = 'accepted' AND status = 'queued'").run(b.id);
+      notify(b, "accepted");
+    } else notify(b, "late", { minute: b.eta_minute });
+  }
+  return bookings.length;
 }

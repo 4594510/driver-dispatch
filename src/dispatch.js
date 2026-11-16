@@ -17,7 +17,9 @@ import { seatPeople } from "./relations.js";
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
 const START_MINUTES = 60; // legs from the driver's own spot are fetched only to stops this soon
-const NEAR_MINUTES = 90; // legs between stops further apart in time than this are never driven back to back
+const NEAR_MINUTES = 90;
+// A rider already taken whose pickup a new ride pushes this much later than they were told hears the new time.
+export const MOVED_MINUTES = 5; // legs between stops further apart in time than this are never driven back to back
 
 // One change to the route at a time. Accepting and re-timing wait for Google in the middle, so two at the same moment
 // would each plan from the same old route and the second would wipe out the first (two full vans accepted at once).
@@ -355,13 +357,19 @@ export const acceptRide = oneAtATime(async (db, travel, id, driverId, settings =
   const blocks = await priorityBlocks(db, travel, b, p);
   const fresh = getBooking(db, id);
   if (!["pending", "proposed"].includes(fresh.status)) return { ok: false, errors: ["not_pending"] };
+  // The pickup time each rider already on the route was told, to see whose time this ride pushes later.
+  const told = new Map(routedRows(db, b.day).filter((r) => r.status === "accepted").map((r) => [r.id, r.eta_minute ?? r.pickup_minute]));
   db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, seat_override = ?, updated_at = ? WHERE id = ?").run(driverId, p.seatConflict ? 1 : 0, nowIso(), id);
   saveRoute(db, b.day, p.after.stops, p.after.timing, p.after.seats);
+  const moved = [...told].map(([rid, was]) => ({ was, booking: getBooking(db, rid) }))
+    .filter((x) => x.booking.eta_minute != null && x.booking.eta_minute - x.was >= MOVED_MINUTES)
+    .map((x) => x.booking);
   const details = { shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops) };
   if (p.seatConflict) details.seatOverride = true;
   if (blocks.length) details.blocksPriority = blocks.map((x) => x.id);
+  if (moved.length) details.moved = moved.map((x) => x.id);
   audit(db, `driver:${driverId}`, "accepted", id, details);
-  return { ok: true, booking: getBooking(db, id), blocks };
+  return { ok: true, booking: getBooking(db, id), blocks, moved };
 });
 
 // Re-time the day after a cancel, pickup, drop-off, no-show or address change. Riders on board keep their seats.
