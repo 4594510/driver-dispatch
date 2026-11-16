@@ -61,7 +61,19 @@ export function addPlaceLists(db, lists = PLACE_LISTS, log = console.log) {
     audit(db, "system:list", "place_code_changed", null, { id: p.id, from: p.code, to: "100" });
     log(`codes: ${p.name} ${p.code} -> 100`);
   }
-  for (const p of db.prepare("SELECT name, code FROM places WHERE active = 1 AND address LIKE '100 %'").all()) log(`codes: ${p.name} is ${p.code}`);
+  // 100 College Rd was saved by phone as "College Rd, Monsey" (the map left out the number) with code 01: give it
+  // its number and code 100, once.
+  const college = "seed:college-100-2026-11-16";
+  if (!db.prepare("SELECT 1 FROM settings WHERE key = ?").get(college)) {
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, '{}')").run(college);
+    for (const p of db.prepare("SELECT * FROM places WHERE active = 1 AND household_id IS NULL AND lower(address) LIKE '%college r%' AND code = '1'").all()) {
+      if (/^\s*\d/.test(p.address)) continue;
+      db.prepare("UPDATE places SET code = '100', address = ?, name = ? WHERE id = ?").run(`100 ${p.address}`, /^\d/.test(p.name) ? p.name : `100 ${p.name}`, p.id);
+      audit(db, "system:list", "place_code_changed", null, { id: p.id, from: p.code, to: "100", address: `100 ${p.address}` });
+      log(`codes: ${p.name} (${p.address}) ${p.code} -> 100`);
+    }
+  }
+  for (const p of db.prepare("SELECT name, code, address FROM places WHERE active = 1 AND lower(address) LIKE '%college r%'").all()) log(`codes: ${p.name} (${p.address}) is ${p.code}`);
 }
 
 // 2026-11-15 (Shloime): codes have no leading zero ("01" is 1), and a place whose code was moved off its house number

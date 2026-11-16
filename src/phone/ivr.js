@@ -11,7 +11,7 @@ import { keypadTime, localParts, canChangePickup } from "../rules.js";
 import { W, numberWords, timePieces, dayPieces } from "./words.js";
 import { piece, namePiece } from "./audio.js";
 import { driverAvailable } from "../driver.js";
-import { AREA_KM } from "../travel.js";
+import { AREA_KM, spokenNumbers } from "../travel.js";
 import { allPlaces, codeMatches, savePlace, MAX_CODE_DIGITS } from "../places.js";
 import { upcomingChanges } from "../schedule.js";
 import { recentAnnouncements } from "../announcements.js";
@@ -777,8 +777,12 @@ async function heardAddress(c, which) {
   const found = c.travel.lookup ? await c.travel.lookup(text) : { status: "unknown" };
   if (found.status === "not_found" || found.km > AREA_KM) return again(P("P59"));
   settle(c, `${which}_say`);
+  // The map may answer with the street only ("College Rd, Monsey"): keep the house number the caller said, so the
+  // driver has it and a saved place gets it as its code (100 College Rd got 01, 2026-11-15).
+  const said = /^\s*(\d{1,6})\b/.exec(spokenNumbers(text))?.[1];
+  const formatted = found.formatted && said && !/^\s*\d/.test(found.formatted) ? `${said} ${found.formatted}` : found.formatted;
   c.st.heard = found.status === "found"
-    ? { address: found.formatted, lat: found.lat, lng: found.lng }
+    ? { address: formatted, lat: found.lat, lng: found.lng }
     : { address: text }; // no map key: the driver gets the words as said
   return ask(`${which}_ok`, [P("P57"), { say: spokenAddress(c.st.heard.address), language: "english" }, P("P58")]);
 }

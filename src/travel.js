@@ -31,7 +31,7 @@ export function spokenNumbers(text) {
     if (/^(\s+|-)$/.test(raw)) { if (n == null) out.push(raw); continue; }
     if (w in ONES) n = n != null && n % 10 === 0 && n >= 20 && ONES[w] < 10 ? n + ONES[w] : n != null && n < 10 && n > 0 ? n * 10 + ONES[w] : (flush(), ONES[w]);
     else if (w in TENS) n = n != null && n > 0 && n < 100 ? n * 100 + TENS[w] : (flush(), TENS[w]);
-    else if (w === "hundred" && n != null) n *= 100;
+    else if (w === "hundred") n = n != null ? n * 100 : 100; // "hundred College Road" is 100
     else { if (n != null) { flush(); out.push(" "); } out.push(raw); }
   }
   flush();

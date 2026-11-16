@@ -757,3 +757,25 @@ test("after the pickup place the caller hears it back, a pause, then 'to'; the h
   const late = await phoneStep(ctx(db, { now: new Date("2026-11-12T01:00:00Z") }), { call_id: "h2", from: "8455550001", step: "start", keys: "" });
   assert.ok(prompts(late).includes("P48"), "8 PM: closed now, so today's hours are said");
 });
+
+test("a said address the map answers without the house number keeps the number, and saved gets it as its code", async () => {
+  const db = setup();
+  const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: "College Rd, Monsey, NY 10952, USA", exact: false });
+  const extra = { travel: { ...travel, lookup } };
+  await call(db, ["6"], { extra, id: "k" });
+  await phoneStep(ctx(db, extra), { call_id: "k", from: "8455550001", step: "add_say", keys: "", transcript: "Hundred College Road, Monsey" });
+  await phoneStep(ctx(db, extra), { call_id: "k", from: "8455550001", step: "add_ok", keys: "1" });
+  const p = db.prepare("SELECT * FROM places WHERE address LIKE '%College%'").get();
+  assert.equal(p.code, "100");
+  assert.match(p.address, /^100 College Rd/);
+});
+
+test("the place saved as College Rd with code 1 gets 100 and its number, once", async () => {
+  const { addPlaceLists } = await import("../src/seed.js");
+  const db = setup();
+  db.prepare("INSERT INTO places (id, household_id, code, kind, name, address) VALUES ('col', NULL, '1', 'other', 'College Road, Monsey', 'College Rd, Monsey, NY 10952, USA')").run();
+  addPlaceLists(db, {}, () => {});
+  const p = db.prepare("SELECT * FROM places WHERE id = 'col'").get();
+  assert.equal(p.code, "100");
+  assert.equal(p.address, "100 College Rd, Monsey, NY 10952, USA");
+});
