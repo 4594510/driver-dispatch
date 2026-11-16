@@ -1,4 +1,4 @@
-// What the phone line says. The fixed prompts (P01 to P94, some unused) are recorded once and uploaded to Fonory under their
+// What the phone line says. The fixed prompts (P01 to P95, some unused) are recorded once and uploaded to Fonory under their
 // codes; the script is the "Phone system setup" tab of the build plan doc, and this list must match it.
 // Everything else (words, numbers, names, places, times) is a spoken piece: a saved recording when we have one,
 // otherwise Fonory's own Yiddish voice says the text, and we make the recording for next time (audio.js).
@@ -113,6 +113,8 @@ export const PROMPTS = {
   P92: "אויב איר האט א פין קאוד, לייגט אים אריין יעצט.",
   P93: "לייגט אריין דעם טעלעפאן נומער פון וואו די רייד איז באשטעלט געווארן, מיט די עריע קאוד.",
   P94: "אייער רייד איז געשיקט געווארן צום דרייווער. רופט צוריק אין א פאר מינוט צו הערן אויב עס איז קאנפירמט.",
+  // Said right after a from or to place is taken, before the next question (instead of reading the place back).
+  P95: "גוט, באקומען.",
 };
 
 // Small words between pieces, recorded once like the numbers.

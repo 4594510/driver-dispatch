@@ -155,13 +155,13 @@ function currentRoute(db, day, rides, ctx, layout) {
 }
 
 // Plan a day with some new rides fitted in. Sync: travel times come from the cache (fetched first by prefetch).
-function planDay(db, day, newRides, ctx) {
+function planDay(db, day, newRides, ctx, opts = {}) {
   const { layout } = vehicleFor(db);
   const rows = routedRows(db, day);
   const rides = rows.map(rideOf).filter((r) => !newRides.some((n) => n.id === r.id));
   const stops = currentRoute(db, day, rides, ctx, layout);
   const before = timeRoute(stops, rides, ctx);
-  const after = newRides.length ? fitRides(stops, rides, newRides, ctx, layout) : null;
+  const after = newRides.length ? fitRides(stops, rides, newRides, ctx, layout, opts) : null;
   return { rides, stops, before, after, layout };
 }
 
@@ -289,9 +289,10 @@ async function planWith(db, travel, b, settings, now) {
   const ctx = contextFor(db, travel, settings, b.day, now);
   const ride = rideOf(withPriority(db, b));
   await prefetch(db, travel, [...routedRows(db, b.day).map(rideOf), ride], ctx);
-  const p = { ...planDay(db, b.day, [ride], ctx), ctx, ride };
+  // The driver decides: a ride he'd reach after its window (GPS) can still be taken; the caller hears the real time.
+  const p = { ...planDay(db, b.day, [ride], ctx, { lateOk: true }), ctx, ride };
   if (!p.after.ok && p.after.reason === "no_seats") {
-    const loose = planDay(db, b.day, [{ ...ride, seatOverride: true }], ctx);
+    const loose = planDay(db, b.day, [{ ...ride, seatOverride: true }], ctx, { lateOk: true });
     if (loose.after.ok) return { ...loose, ctx, ride: { ...ride, seatOverride: true }, seatConflict: true };
   }
   return p;
@@ -335,6 +336,8 @@ export async function previewAccept(db, travel, id, settings = DEFAULT_SETTINGS,
     after: describe(p.after.stops, p.after.timing),
     shifts: shifts(p.before, p.stops, p.after.timing, p.after.stops),
     eta: Math.round(etas(p.after.stops, p.after.timing)[id].pickup),
+    // The asked time, when the GPS says the pickup will be after the window: the app shows both.
+    asked: p.after.timing.late[id] > 0 ? b.pickup_minute : undefined,
     priority: { level: p.ride.priority, label: LEVELS[p.ride.priority] },
     blocks: await priorityBlocks(db, travel, b, p),
   };

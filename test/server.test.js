@@ -286,6 +286,10 @@ test("Teltech's collect: our listen step becomes a voice collect with a transcri
   // From and to: # alone is an answer (min_digits 0), so it reaches us as "say an address".
   const fromQ = toActions({ play: [], gather: { step: "from", max_keys: 6, timeout_s: 6, min_keys: 0 } }, "https://d.example", {});
   assert.equal(fromQ.actions.at(-1).min_digits, 0);
+  // Place codes: sent 1.5 seconds after the last key; # alone still works when every code is one digit.
+  const quick = toActions({ play: [], gather: { step: "from", max_keys: 1, timeout_s: 6, min_keys: 0, digit_ms: 1500 } }, "https://d.example", {});
+  assert.equal(quick.actions.at(-1).digit_timeout, 1500);
+  assert.equal(quick.actions.at(-1).terminator, "#");
   const english = toActions({ play: [{ say: "12 Main Street, Monsey", language: "english" }], hangup: true }, "https://d.example", {});
   assert.equal(english.actions[0].language, "english");
 });

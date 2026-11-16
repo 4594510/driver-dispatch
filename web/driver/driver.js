@@ -496,18 +496,22 @@ async function take(id) {
   const moved = Object.keys(p.shifts || {}).length;
   const blocks = p.blocks || [];
   const seat = !!p.seatConflict;
-  if (!moved && !blocks.length && !seat) {
+  const late = p.asked != null;
+  if (!moved && !blocks.length && !seat && !late) {
     closeSheet();
     await act(`/api/driver/bookings/${id}/accept`, {}, { queueable: false, ok: `Taken. Pick up about ${minuteText(p.eta)}` });
     return;
   }
   sheet(`<h2>${esc(req?.rider_name || "Ride")}: pick up about ${minuteText(p.eta)}</h2>
+    ${late ? `<div class="notes" style="border:2px solid var(--warn)"><b>Later than asked:</b> they asked for ${minuteText(p.asked)}.
+      By GPS you'll get there about ${minuteText(p.eta)}. If you take it, they are told ${minuteText(p.eta)}.</div>` : ""}
     ${moved ? `<p>${moved} other ride${moved > 1 ? "s" : ""} will be a little later. They get a message if needed.</p>` : ""}
     ${blocks.length ? `<div class="notes" style="border:2px solid var(--bad)"><b>Wait:</b> ${blocks.map((x) => `<b>${esc(x.rider_name || "a rider")}</b>`).join(", ")}
       is also waiting and goes first (${esc(blocks[0].label)} priority). If you take this one, there's no room for them.</div>` : ""}
     ${seat ? `<div class="notes" style="border:2px solid var(--warn)"><b>Seats:</b> with this ride, men and women can't each get their own rows
       (${esc(people(req || p.seatsOnBoard || {}))} on this ride). You can still take it and seat them yourself.</div>` : ""}
     <button class="${blocks.length || seat ? "bad" : "good"} big" data-act="accept" data-id="${id}" ${seat ? 'data-override="1"' : ""}>${blocks.length || seat ? "Take it anyway" : "Take it"}</button>
+    ${late ? `<button class="ghost big" data-propose="${id}">Offer another time</button>` : ""}
     <button class="bad big" data-act="reject" data-id="${id}">Can't</button>
     <button class="link" data-preview="${id}">Details</button>`);
 }
