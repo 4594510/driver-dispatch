@@ -13,6 +13,12 @@ export const DEFAULT_SETTINGS = {
   driverWaitMinutes: 5,
   stopMinutes: 2, // planned time at each stop to get in or out
   serviceAreas: ["Monsey", "Spring Valley"],
+  // Admin settings (Shloime, 2026-11-17). seatRows: the system keeps men and women in their own rows (seating.js);
+  // false: seats are only counted (never more than the van holds) and the driver seats people himself.
+  seatRows: true,
+  // phoneSayPlace: after a place code on the phone, say the place back ("from <place>") before the next question;
+  // false: a short "got it" (P95) and on at once, the place said only in the read-back.
+  phoneSayPlace: false,
 };
 
 // The local calendar date ("2026-11-11") and minute of the day for a moment in time.

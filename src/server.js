@@ -18,7 +18,7 @@ import { allPieces } from "./phone/words.js";
 import { notifyBooking, queueReminders, sendDue, callEnded } from "./notify.js";
 import * as auth from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
-import { scheduleView, addChange, removeChange } from "./schedule.js";
+import { scheduleView, addChange, removeChange, calendarDays } from "./schedule.js";
 import { report } from "./reports.js";
 import { createAnnouncement, listAnnouncements, listSenders, addSender, removeSender, textIn } from "./announcements.js";
 import { localParts } from "./rules.js";
@@ -515,6 +515,10 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
   });
   // --- schedule changes: other hours, or no rides, for a day or a range (the driver app has the same) ---
   admin.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), clock())));
+  admin.get("/schedule/days", (req, res) => {
+    const r = calendarDays(db, getSettings(db), clock(), String(req.query.from || ""), String(req.query.to || ""));
+    r.ok ? res.json(r) : bad(res, r.error);
+  });
   admin.post("/schedule", (req, res) => {
     const r = addChange(db, req.body, req.actor, getSettings(db), clock());
     r.ok ? res.json(r) : bad(res, r.error);

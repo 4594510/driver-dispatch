@@ -886,8 +886,10 @@ function setPlace(c, which, place, next) {
   c.st.draft[which] = place.id;
   c.st.draft[`${which}Address`] = null;
   if (c.st.draft.editing) return onward(c, next);
-  // A short recorded "got it" and the next question right away (Shloime, 2026-11-16: reading the place back took too
-  // long). The place is said in the read-back at the end.
+  // The admin's setting (Shloime, 2026-11-17): say the place back ("from the shul"), a short pause, then the next
+  // question, as before 2026-11-16; or (the default) a short recorded "got it" and the next question right away
+  // (Shloime, 2026-11-16: reading the place back took too long). The place is said in the read-back at the end.
+  if (c.settings.phoneSayPlace) return ask(next, [c.say(which === "from" ? W.from : W.to), c.name(place), { pause: 700 }, Q[next]()]);
   return ask(next, [P("P95"), Q[next]()]);
 }
 

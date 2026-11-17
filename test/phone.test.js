@@ -785,6 +785,20 @@ test("after the pickup place the caller hears a short 'got it' and 'to' at once;
   assert.ok(prompts(late).includes("P48"), "8 PM: closed now, so today's hours are said");
 });
 
+test("admin setting: say the place back after a place code (as before), or just go on (the default)", async () => {
+  const db = setup();
+  const extra = { settings: { ...settings, phoneSayPlace: true } };
+  const r = await call(db, ["1", "1", "20"], { extra });
+  const last = r.at(-1);
+  assert.equal(last.gather.step, "to");
+  assert.ok(!prompts(last).includes("P95"), "no short 'got it'");
+  assert.ok(said(last).includes("פון"), "from ...");
+  assert.ok(last.play.some((p) => p.pause), "a short pause before the next question");
+  assert.equal(prompts(last).at(-1), "P12");
+  const next = await phoneStep(ctx(db, extra), { call_id: "c1", from: "8455550001", step: "to", keys: "0" });
+  assert.ok(said(next).includes("קיין"), "to ...");
+});
+
 test("a said address the map answers without the house number keeps the number, and saved gets it as its code", async () => {
   const db = setup();
   const lookup = async () => ({ status: "found", lat: 41.1, lng: -74.05, formatted: "College Rd, Monsey, NY 10952, USA", exact: false });

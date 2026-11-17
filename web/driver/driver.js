@@ -78,6 +78,8 @@ const minuteText = (m) => {
 };
 const people = (x) => !x.men && !x.women ? "📦 Package only, no riders" : [x.men ? `${x.men} ${x.men === 1 ? "man" : "men"}` : "", x.women ? `${x.women} ${x.women === 1 ? "woman" : "women"}` : ""].filter(Boolean).join(", ");
 const ROWS = { front: "Front", row2: "Row 2", row3: "Row 3" };
+// With the admin's "just count the seats" setting: how many men and women are in the van (the driver seats them).
+const vanText = (x) => (!x.men && !x.women ? "nobody" : [x.men && `${x.men} ${x.men === 1 ? "man" : "men"}`, x.women && `${x.women} ${x.women === 1 ? "woman" : "women"}`].filter(Boolean).join(", "));
 const seatText = (seats) => Object.entries(seats || {}).map(([r, s]) => `${ROWS[r] || r}: ${people(s)}`).join(" · ");
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
@@ -330,7 +332,8 @@ function stopCard(s, big) {
     ${pickup ? timesLine(s, s.arrive) : ""}
     ${placeAddr(s)}
     <div class="quiet">${people(s)}${s.together ? " · may sit together" : ""}</div>
-    ${big && s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
+    ${big && s.seats && today?.seatRows !== false ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
+    ${today?.seatRows === false && s.onBoardAfter ? `<div class="quiet">In the van after this stop: <b>${esc(vanText(s.onBoardAfter))}</b></div>` : ""}
     ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
     ${big ? `
       ${pickup ? `<button class="good huge-btn" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
@@ -809,7 +812,8 @@ function proposeSheet(id) {
   for (let m = from; times.length < 10 && m <= h.closeMinute; m += 15) if (m !== base && m >= h.openMinute) times.push(m);
   sheet(`<h2>Suggest a time for ${esc(r?.rider_name || "this ride")}</h2><p class="quiet">The caller is asked to agree.</p>
     <div class="chips">${times.map((m) => `<button class="ghost" data-propose-at="${m}" data-id="${id}">${minuteText(m)}</button>`).join("")}</div>
-    <form id="propose-form" onsubmit="return false"><label>Or any time ${timePick("t", null, "Choose…")}</label></form>
+    <form id="propose-form" onsubmit="return false"><label>Or type any time <input id="propose-time" name="t" inputmode="decimal" autocomplete="off" placeholder="for example 2:35" maxlength="10"></label>
+      <div class="quiet" id="propose-said"></div></form>
     <button class="good big" data-propose-typed="${id}">Offer this time</button>
     <button class="ghost big" data-close>Cancel</button>`);
 }
@@ -916,7 +920,7 @@ async function everyoneSheet() {
     <label>Write the message <textarea id="ev-text" rows="4" maxlength="500"></textarea></label>
     <button class="good big" data-everyone-send>Send to everyone</button>
     <button class="ghost big" data-close>Close</button>
-    ${past.length ? `<h3>Sent before</h3>${past.map((a) => `<div class="card"><p>${esc(a.text)}</p><p class="quiet">${esc(new Date(a.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</p></div>`).join("")}` : ""}`);
+    ${past.length ? `<h3>Sent before</h3>${past.map((a) => `<div class="card"><p>${esc(a.text)}</p><p class="quiet">Sent ${esc(new Date(a.created_at).toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }))}</p></div>`).join("")}` : ""}`);
 }
 
 // Local change right away, so the driver can go on without signal.
@@ -929,6 +933,14 @@ function nextLocal() {
   today.next = today.route.stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind !== "pickup" && s.status === "picked_up")) || null;
   store.set("driver.today", today);
 }
+
+// The typed time, as the app understands it, under the field (2:35 becomes 2:35 PM).
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "propose-time") return;
+  const v = parseTimeText(e.target.value);
+  const said = $("#propose-said");
+  if (said) said.textContent = !e.target.value.trim() ? "" : v == null ? "Not a time yet. For example 2:35 or 11:10." : `= ${minuteText(v)}`;
+});
 
 // --- clicks ---
 document.addEventListener("click", async (e) => {
@@ -961,8 +973,8 @@ document.addEventListener("click", async (e) => {
   if (ds.addPlace != null) return addPlaceSheet();
   if (ds.placeSave != null) return savePlace();
   if (ds.proposeTyped) {
-    const v = $("#propose-form") ? readPick($("#propose-form"), "t") : null;
-    if (v == null) { toast("Choose a time first."); return; }
+    const v = parseTimeText($("#propose-time")?.value);
+    if (v == null) { toast("Type a time, for example 2:35."); return; }
     closeSheet();
     await act(`/api/driver/bookings/${ds.proposeTyped}/propose`, { minute: v }, { queueable: false, ok: "Sent to the caller" });
     return;

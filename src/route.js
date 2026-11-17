@@ -99,9 +99,11 @@ function seatInput(stops, rides) {
 
 // Seats for a route. Riders on board keep their seats exactly; everyone else may be moved before pickup.
 // A ride the driver took against the seat rules (seatOverride) makes the check count heads only: at no point more
-// people on board than the van has seats. The driver seats them himself.
+// people on board than the van has seats. The driver seats them himself. So does the admin's "just count the seats"
+// setting (layout.countOnly, from dispatch.js vehicleFor).
 export function seatRoute(stops, rides, layout = DEFAULT_LAYOUT) {
   const input = seatInput(stops, rides);
+  if (layout.countOnly) return headCount(input, stops.length, layout);
   if (rides.some((r) => r.seatOverride && input.some((x) => x.id === r.id))) return headCount(input, stops.length, layout);
   const res = planSeats(input, layout);
   if (!res.ok) return res;

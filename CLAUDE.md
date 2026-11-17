@@ -115,6 +115,14 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   the riders stay on board (seats unchanged), and the planner drives them right before the drop-off (route.js ride.via).
   Each shows in the route as "Stop on the way" with "Done here"; a ride already taken is re-timed at once. A ride with
   stops has no 30-minute on-board limit. The dashboard's ride tables list them. Not on the phone.
+- Admin settings and easier entry (Shloime, 2026-11-17): Settings > Seats: "The system arranges the seats" (rows, as
+  above) or "Just count the seats" (settings.seatRows false: dispatch.js vehicleFor sets layout.countOnly, route.js
+  seatRoute only counts heads, never over 7; taken rides get seat_override; the driver app and dashboard route show men
+  and women in the van after each stop). Settings > Phone booking: after a place code "just go on" (P95, default) or
+  "say the place back" (settings.phoneSayPlace: פון/קיין + the name, as before 2026-11-16). Offering another time is a
+  free time field (web/driver/timetext.js parseTimeText: 2:35, 235, 14:30, 2:35 pm; 1-6 without AM/PM is afternoon).
+  The dashboard's Schedule is a calendar, week or month (/api/admin/schedule/days); tap a day, a later day for a range.
+  Announcements show the weekday, date and time they were added.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
