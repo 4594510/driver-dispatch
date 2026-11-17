@@ -522,3 +522,27 @@ test("stops on the way: the driver adds them to a ride, they come before the dro
     assert.equal((await call(`/api/driver/bookings/${a}/stops`, "POST", { address: "7 Next Ave" })).body.errors[0], "wrong_status");
   });
 });
+
+test("the driver app has what the office has: the hours calendar by week or month, and changing a ride's address", async () => {
+  await withDay(async ({ call, setToken, db }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "845-555-0100", pin: "4321" })).body.token);
+    const month = await call("/api/driver/schedule/days?from=2026-11-01&to=2026-12-12");
+    assert.equal(month.body.ok, true);
+    assert.equal(month.body.days.length, 42);
+    assert.equal(month.body.days.find((d) => d.day === "2026-11-11").today, true);
+    assert.equal((await call("/api/driver/schedule/days?from=2026-11-01&to=2027-02-01")).body.ok, false);
+
+    const a = (await call("/api/admin/bookings", "POST", ride())).body.bookings[0].id;
+    assert.equal((await call(`/api/driver/bookings/${a}/accept`, "POST", { key: "a1" })).status, 200);
+    const ch = await call(`/api/driver/bookings/${a}/address`, "POST", { key: "a2", end: "dropoff", address: "3 Other St" });
+    assert.equal(ch.status, 200, JSON.stringify(ch.body));
+    const b = db.prepare("SELECT * FROM bookings WHERE id = ?").get(a);
+    assert.equal(b.dropoff_address, "3 Other St");
+    assert.equal(b.dropoff_lat, 46);
+    const stops = (await call("/api/driver/today")).body.route.stops;
+    assert.equal(stops.find((s) => s.kind === "dropoff").address, "3 Other St", "the route is re-timed with the new address");
+    assert.equal((await call(`/api/driver/bookings/${a}/address`, "POST", { key: "a3", end: "pickup", address: "Nowhere Known" })).body.errors[0], "not_on_map");
+    assert.equal((await call(`/api/driver/bookings/${a}/address`, "POST", { key: "a4", end: "pickup", address: "3 Other St" })).body.errors[0], "same_place");
+  });
+});
