@@ -109,6 +109,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   the pickup time if taken now, from the preview) and, once done, Picked up / Dropped off.
 - Every ride shows where from and where to side by side, pickup on the left, drop-off on the right (Shloime, 2026-11-17),
   in the driver app and the dashboard's ride tables; left stays left for a Yiddish address (fromTo in driver.js, app.js).
+  A saved place always shows its name with its full address under it (driver.js placeName).
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
