@@ -311,6 +311,19 @@ export function openDb(file = process.env.DB_FILE || "data/dispatch.db") {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    -- Stops on the way of a ride (stops.js): pickup, then these in order, then the drop-off. The riders stay on board.
+    CREATE TABLE IF NOT EXISTS ride_stops (
+      id TEXT PRIMARY KEY,
+      booking_id TEXT NOT NULL,
+      n INTEGER NOT NULL,                        -- the order, 1 first
+      place_id TEXT,                             -- a saved place, or NULL for a typed address
+      address TEXT NOT NULL,
+      lat REAL,
+      lng REAL,
+      done_at TEXT,                              -- the driver pressed "Done here"
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ride_stops_booking ON ride_stops (booking_id, n);
     -- Numbers that may send a message to everyone by texting the line (announcements.js textIn).
     CREATE TABLE IF NOT EXISTS message_senders (
       number TEXT PRIMARY KEY,                   -- E.164, +18455551234

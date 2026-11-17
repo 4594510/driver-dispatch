@@ -474,3 +474,51 @@ test("a saved place shows its name with its address; a typed address shows only 
   assert.equal(placeName(db, "same", "7 Main St"), "");
   assert.equal(placeName(db, null, "9 Typed Ave"), "");
 });
+
+test("stops on the way: the driver adds them to a ride, they come before the drop-off, Done here and Remove", async () => {
+  await withDay(async ({ call, setToken, db }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
+    // 1 Example Ln (41) to 5 Sample Rd (51) at 12:00.
+    const a = (await call("/api/admin/bookings", "POST", ride())).body.bookings[0].id;
+    // A stop on a waiting request: it shows on the request and counts when it is taken.
+    const s1 = await call(`/api/driver/bookings/${a}/stops`, "POST", { address: "7 Next Ave", key: "s1" });
+    assert.equal(s1.status, 200, JSON.stringify(s1.body));
+    assert.equal((await call(`/api/driver/bookings/${a}/stops`, "POST", { address: "Nowhere at all" })).body.errors[0], "not_on_map");
+    let today = (await call("/api/driver/today")).body;
+    assert.deepEqual(today.requests[0].stops.map((x) => [x.n, x.address, x.done]), [[1, "7 Next Ave", false]]);
+    assert.equal((await call(`/api/driver/requests/${a}/preview`)).body.ok, true);
+    assert.equal((await call(`/api/driver/bookings/${a}/accept`, "POST", { key: "acc" })).status, 200);
+
+    // A second stop on the taken ride (a saved place): the route is re-timed at once.
+    db.prepare("INSERT INTO places (id, code, kind, name, address, lat, lng, active) VALUES ('pl1', '9', 'other', 'Store', '3 Other St', 46, -74, 1)").run();
+    assert.equal((await call(`/api/driver/bookings/${a}/stops`, "POST", { placeId: "pl1", key: "s2" })).status, 200);
+    today = (await call("/api/driver/today")).body;
+    assert.deepEqual(today.route.stops.map((s) => s.kind), ["pickup", "stop", "stop", "dropoff"]);
+    assert.deepEqual(today.route.stops.map((s) => s.arrive), [720, 725, 729, 736], "41 -> 44 -> 46 -> 51, 2 minutes at each stop");
+    assert.equal(today.route.stops[2].place, "Store");
+    assert.equal(today.rides[0].stops.length, 2);
+
+    // On board: the next stop is the first stop on the way; Done here moves on to the next one.
+    await call(`/api/driver/bookings/${a}/pickup`, "POST", { key: "pu" });
+    today = (await call("/api/driver/today")).body;
+    assert.equal(today.next.kind, "stop");
+    assert.equal(today.next.address, "7 Next Ave");
+    const first = today.next.stop_id;
+    assert.equal((await call(`/api/driver/stops/${first}/done`, "POST", { key: "d1" })).status, 200);
+    today = (await call("/api/driver/today")).body;
+    assert.equal(today.next.address, "3 Other St");
+    assert.deepEqual(today.rides[0].stops.map((x) => x.done), [true, false]);
+    assert.equal((await call(`/api/driver/stops/${first}/remove`, "POST", {})).body.errors[0], "stop_done", "a stop already done stays");
+
+    // Remove the other one: straight to the drop-off.
+    assert.equal((await call(`/api/driver/stops/${today.next.stop_id}/remove`, "POST", { key: "rm" })).status, 200);
+    today = (await call("/api/driver/today")).body;
+    assert.equal(today.next.kind, "dropoff");
+    assert.deepEqual(today.route.stops.map((s) => s.kind), ["dropoff"]);
+    // Done rides take no new stops.
+    await call(`/api/driver/bookings/${a}/done`, "POST", { key: "dn" });
+    assert.equal((await call(`/api/driver/bookings/${a}/stops`, "POST", { address: "7 Next Ave" })).body.errors[0], "wrong_status");
+  });
+});

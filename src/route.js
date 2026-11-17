@@ -1,6 +1,7 @@
 // Route planning (stage 3): the order of stops for one vehicle's day, with arrival times and seats.
 //
-// A ride is { id, men, women, together, seats?, windowStart, windowEnd, from, to, onBoard, pickedUpAt?, priority? }:
+// A ride is { id, men, women, together, seats?, windowStart, windowEnd, from, to, onBoard, pickedUpAt?, priority?,
+// via?, hasStops? }: via is the stops on the way still to do ([{ id, at }], stops.js), driven right before the drop-off.
 // from/to are point keys (travel.js), the window is the promised pickup window in minutes after midnight, onBoard
 // means the driver already picked them up (only the drop-off is left, and their seats can't change). priority is the
 // admin's level for the rider (0 normal, 1 high, 2 top; priority.js): their waiting counts more when choosing an order.
@@ -32,17 +33,28 @@ export function timeRoute(stops, rides, ctx) {
   const late = {};
   const over = {};
   const times = [];
+  const go = (at, first) => {
+    if (pos === undefined) return t ?? first;
+    const leg = ctx.minutes(pos, at, t);
+    drive += leg.minutes;
+    estimated ||= leg.estimated;
+    return t + leg.minutes;
+  };
   for (const s of stops) {
     const r = byId.get(s.ride);
     const at = s.kind === "pickup" ? r.from : r.to;
-    let arrive;
-    if (pos === undefined) arrive = t ?? r.windowStart;
-    else {
-      const leg = ctx.minutes(pos, at, t);
-      drive += leg.minutes;
-      estimated ||= leg.estimated;
-      arrive = t + leg.minutes;
+    // Stops on the way (stops.js): driven in order right before this ride's drop-off, the riders on board.
+    let via;
+    if (s.kind === "dropoff" && r.via?.length) {
+      via = [];
+      for (const v of r.via) {
+        const a = go(v.at, r.windowStart);
+        via.push({ id: v.id, arrive: a, depart: a + ctx.stopMinutes });
+        pos = v.at;
+        t = a + ctx.stopMinutes;
+      }
     }
+    const arrive = go(at, r.windowStart);
     let depart;
     if (s.kind === "pickup") {
       const begin = Math.max(arrive, r.windowStart);
@@ -52,9 +64,10 @@ export function timeRoute(stops, rides, ctx) {
       times.push({ arrive: begin, depart });
     } else {
       const onBoard = arrive - pickedAt.get(r.id);
-      if (onBoard > ctx.maxTrip + EPS) over[r.id] = onBoard - ctx.maxTrip;
+      // A ride with stops on the way has no limit on board: the caller asked for the detour.
+      if (!r.hasStops && onBoard > ctx.maxTrip + EPS) over[r.id] = onBoard - ctx.maxTrip;
       depart = arrive + ctx.stopMinutes;
-      times.push({ arrive, depart });
+      times.push(via ? { arrive, depart, via } : { arrive, depart });
     }
     pos = at;
     t = depart;
