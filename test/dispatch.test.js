@@ -4,6 +4,7 @@ import { openDb } from "../src/db.js";
 import { bookRide, previewAccept, acceptRide, refreshDay, dayRoute } from "../src/dispatch.js";
 import { changeStatus, getBooking } from "../src/bookings.js";
 import { DEFAULT_SETTINGS } from "../src/rules.js";
+import { updateSettings } from "../src/settings.js";
 import { createTravel } from "../src/travel.js";
 
 const now = new Date("2026-11-11T15:00:00Z"); // 10:00 AM New York
@@ -306,4 +307,37 @@ test("a rider pushed later before their 'accepted' text went out gets that text 
   assert.deepEqual(rows.map((r) => r.kind), ["accepted"]);
   const { timeText } = await import("../src/phone/words.js");
   assert.ok(rows[0].body.includes(timeText(735)));
+});
+
+test("admin setting 'just count the seats': no row rules, the driver seats people, never more than 7", async () => {
+  const db = setup();
+  const travel = fakeTravel();
+  assert.ok(updateSettings(db, { seatRows: false }, "admin:test").ok);
+  // 2 men and 5 women don't fit the rows, but with seats only counted it is a plain request.
+  const r = await bookRide(db, travel, ask({ men: 2, women: 5 }), now, settings);
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.equal(r.seatConflict, false);
+  const id = r.bookings[0].id;
+  assert.equal((await previewAccept(db, travel, id, settings, now)).seatConflict, false);
+  const yes = await acceptRide(db, travel, id, "drv1", settings, now);
+  assert.ok(yes.ok, JSON.stringify(yes));
+  assert.equal(getBooking(db, id).seats, null, "no row plan");
+  assert.equal(getBooking(db, id).seat_override, 1, "stays counted if the setting goes back to rows");
+  assert.equal(dayRoute(db, day).countOnly, true);
+  const more = await bookRide(db, travel, ask({ men: 1 }), now, settings);
+  assert.equal(more.ok, false, "an eighth person doesn't fit");
+  // Back to rows: the ride already taken stays, and the day still plans.
+  assert.ok(updateSettings(db, { seatRows: true }, "admin:test").ok);
+  assert.equal(dayRoute(db, day).countOnly, false);
+  assert.equal((await refreshDay(db, travel, day, settings, now)).ok, true);
+});
+
+test("the seat and phone settings take only yes or no", () => {
+  const db = setup();
+  assert.equal(updateSettings(db, { seatRows: "no" }, "admin:test").ok, false);
+  assert.equal(updateSettings(db, { phoneSayPlace: 1 }, "admin:test").ok, false);
+  const r = updateSettings(db, { phoneSayPlace: true }, "admin:test");
+  assert.ok(r.ok);
+  assert.equal(r.settings.phoneSayPlace, true);
+  assert.equal(r.settings.seatRows, true, "rows by default");
 });

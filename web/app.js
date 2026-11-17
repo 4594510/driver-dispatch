@@ -54,6 +54,8 @@ const minuteText = (m) => {
   const h24 = Math.floor(m / 60);
   return `${((h24 + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`;
 };
+// A moment as "Tue, Nov 17, 6:30 PM", New York time (when an announcement was added; Shloime, 2026-11-17).
+const stampText = (iso) => new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 const timeToMinute = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
 const minuteToTime = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const STATUS = { pending: "Waiting for driver", proposed: "New time offered", accepted: "Accepted", picked_up: "On board", completed: "Completed", rejected: "Rejected", cancelled: "Cancelled", no_show: "No-show" };
@@ -203,9 +205,11 @@ function wireBookings(el, reload) {
       if (p.seatConflict) body = { override: true };
     }
     if (a === "propose") {
-      const t = prompt("New pickup time (for example 14:30)");
+      const t = prompt("New pickup time (for example 2:35 or 2:35 pm)");
       if (!t) return;
-      body = { minute: timeToMinute(t) };
+      const minute = parseTimeText(t);
+      if (minute == null) { toast("That isn't a time. Type it like 2:35 or 11:10 am."); return; }
+      body = { minute };
     }
     if (["cancel", "reject", "no_show"].includes(a) && !confirm("Are you sure?")) return;
     if (await act(() => api(`/api/admin/bookings/${id}/${a}`, { method: "POST", body }), "Done")) reload();
@@ -347,12 +351,22 @@ function routeCard(r) {
     const s = r.seatsByStop[i];
     return s ? s.rows.map((x) => `${{ front: "F", row2: "2", row3: "3" }[x.row] || x.row}:${x.free}`).join(" ") : "";
   };
-  return `<p class="quiet">${r.stops.length} stops, about ${r.driveMinutes} minutes of driving${r.estimated ? " (some drive times are estimates)" : ""}.</p>
-    <div class="wrap"><table><thead><tr><th>Time</th><th>Stop</th><th>Who</th><th>Address</th><th>Seats</th><th>Free after (front, 2, 3)</th></tr></thead><tbody>${r.stops.map((s, i) => {
+  // "Just count the seats" (Settings): men and women in the van after each stop instead of rows.
+  const picks = new Set(r.stops.filter((s) => s.kind === "pickup").map((s) => s.booking_id));
+  const load = { men: 0, women: 0 };
+  for (const s of r.stops) if (s.kind === "dropoff" && !picks.has(s.booking_id)) { load.men += s.men || 0; load.women += s.women || 0; }
+  const van = r.stops.map((s) => {
+    const sign = s.kind === "pickup" ? 1 : -1;
+    load.men += sign * (s.men || 0);
+    load.women += sign * (s.women || 0);
+    return `${load.men} men, ${load.women} women`;
+  });
+  return `<p class="quiet">${r.stops.length} stops, about ${r.driveMinutes} minutes of driving${r.estimated ? " (some drive times are estimates)" : ""}.${r.countOnly ? " Seats are only counted; the driver seats people (Settings)." : ""}</p>
+    <div class="wrap"><table><thead><tr><th>Time</th><th>Stop</th><th>Who</th><th>Address</th>${r.countOnly ? "<th>In the van after</th>" : "<th>Seats</th><th>Free after (front, 2, 3)</th>"}</tr></thead><tbody>${r.stops.map((s, i) => {
       const late = s.window && s.arrive > s.window[1];
       return `<tr><td>${minuteText(s.arrive)}${s.window ? `<div class="quiet${late ? " error" : ""}">window ${minuteText(s.window[0])}–${minuteText(s.window[1])}${late ? ", late" : ""}</div>` : ""}</td>
         <td>${s.kind === "pickup" ? "Pick up" : "Drop off"}</td><td>${esc(s.rider_name || "")}<div class="quiet">${esc(riders(s))}</div></td>
-        <td>${esc(s.address)}</td><td>${esc(seatText(s.seats))}</td><td class="quiet">${esc(freeAfter(i))}</td></tr>`;
+        <td>${esc(s.address)}</td>${r.countOnly ? `<td>${esc(van[i])}</td>` : `<td>${esc(seatText(s.seats))}</td><td class="quiet">${esc(freeAfter(i))}</td>`}</tr>`;
     }).join("")}</tbody></table></div>`;
 }
 const placeOptions = (places) => places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} ${esc(p.name)}${p.household_id ? "" : " (shared)"}</option>`).join("");
@@ -590,15 +604,70 @@ function changeText(c) {
   const only = c.weekdays ? `, only ${c.weekdays.map((d) => WEEKDAY_NAMES[d]).join(", ")}` : "";
   return `${days}${only}: ${hoursText(c)}`;
 }
+// The schedule as a calendar (Shloime, 2026-11-17: "a date picker (calendar) instead of a list, week view"): a week or
+// a month at a time. Tap a day to pick it, tap a later day to make it a range; the form under it fills in.
+const isoDay = (d) => d.toISOString().slice(0, 10);
+const shiftDay = (day, n) => { const d = new Date(`${day}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return isoDay(d); };
+const weekStart = (day) => shiftDay(day, -new Date(`${day}T12:00:00Z`).getUTCDay());
+const cal = { view: "month", at: null, from: null, to: null };
+function calRange() {
+  if (cal.view === "week") { const a = weekStart(cal.at); return [a, shiftDay(a, 6)]; }
+  const first = `${cal.at.slice(0, 7)}-01`;
+  const a = weekStart(first);
+  return [a, shiftDay(a, 41)];
+}
+function calTitle() {
+  const [a, b] = calRange();
+  if (cal.view === "month") return new Date(`${cal.at.slice(0, 7)}-15T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return `${dayText(a)} – ${dayText(b)}`;
+}
+async function drawCalendar() {
+  const box = $("#cal-box");
+  if (!box) return;
+  const [a, b] = calRange();
+  let r;
+  try { r = await api(`/api/admin/schedule/days?from=${a}&to=${b}`); } catch (e) { box.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  if (!$("#cal-box")) return;
+  const month = cal.at.slice(0, 7);
+  const inSel = (d) => cal.from && (d === cal.from || (cal.to && d >= cal.from && d <= cal.to));
+  $("#cal-title").textContent = calTitle();
+  box.innerHTML = `<div class="cal ${cal.view}">${WEEKDAY_NAMES.map((n) => `<div class="wd">${n}</div>`).join("")}
+    ${r.days.map((d) => {
+      const cls = ["cd", d.past && "past", d.today && "today", d.closed ? "closed" : d.changed && "changed", inSel(d.day) && "sel",
+        cal.view === "month" && d.day.slice(0, 7) !== month && "other"].filter(Boolean).join(" ");
+      const n = Number(d.day.slice(8));
+      const label = cal.view === "week" || n === 1 ? new Date(`${d.day}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : n;
+      return `<button type="button" class="${cls}" data-cal-day="${d.day}" ${d.past ? "disabled" : ""} title="${esc(dayText(d.day))}: ${esc(hoursText(d))}">
+        <span class="n">${esc(label)}${d.today ? " · today" : ""}</span>
+        <span class="h">${d.closed ? "No rides" : esc(hoursText(d))}</span>
+        ${d.breaks.map((x) => `<span class="h brk">Break ${esc(minuteText(x.startMinute))}–${esc(minuteText(x.endMinute))}</span>`).join("")}</button>`;
+    }).join("")}</div>`;
+}
+function calPick(day) {
+  if (!cal.from || cal.to || day < cal.from) { cal.from = day; cal.to = null; }
+  else if (day === cal.from) { cal.to = null; }
+  else cal.to = day;
+  const form = $("#sch");
+  form.from.value = cal.from;
+  form.to.value = cal.to || "";
+  $("#sch-picked").textContent = cal.to ? `${dayText(cal.from)} to ${dayText(cal.to)}` : `${dayText(cal.from)} (tap a later day for several days)`;
+  drawCalendar();
+}
 async function schedule() {
   const v = await api("/api/admin/schedule");
   const first = v.days[0].day;
+  cal.at = cal.at || first;
+  cal.from = null; cal.to = null;
   main.innerHTML = `
-    <div class="card"><h2>Next two weeks</h2>
-      <p class="quiet">Usual hours ${minuteText(v.usual.openMinute)} – ${minuteText(v.usual.closeMinute)} (change them under Settings). Callers hear today's hours when they're different, and can press 4 to hear the changes coming up.</p>
-      <table><tbody>${v.days.map((d) => `<tr><td>${esc(dayText(d.day))}${d.day === first ? " (today)" : ""}</td>
-        <td>${d.changed ? `<b>${esc(hoursText(d))}</b>` : esc(hoursText(d))}</td><td class="quiet">${d.changed ? "changed" : ""}</td></tr>`).join("")}</tbody></table></div>
+    <div class="card"><h2>Calendar</h2>
+      <p class="quiet">Usual hours ${minuteText(v.usual.openMinute)} – ${minuteText(v.usual.closeMinute)} (change them under Settings). Days with other hours have an orange border, days with no rides a red one. Tap a day to change it; tap a later day too for several days.</p>
+      <div class="cal-bar"><button type="button" class="${cal.view === "week" ? "on" : "ghost"}" data-cal-view="week">Week</button>
+        <button type="button" class="${cal.view === "month" ? "on" : "ghost"}" data-cal-view="month">Month</button>
+        <button type="button" class="ghost" data-cal-move="-1">‹</button><span class="cal-title" id="cal-title"></span><button type="button" class="ghost" data-cal-move="1">›</button>
+        <button type="button" class="ghost" data-cal-today>Today</button></div>
+      <div id="cal-box"><p class="quiet">Loading…</p></div></div>
     <div class="card"><h2>Change the schedule</h2><form id="sch">
+      <p><b id="sch-picked">Tap a day in the calendar, or choose the dates here.</b></p>
       <div class="row"><label>First day <input type="date" name="from" value="${first}" min="${first}" required></label>
         <label>Last day (empty = one day) <input type="date" name="to" min="${first}"></label></div>
       <div class="row"><label><input type="radio" name="kind" value="hours" checked style="display:inline;width:auto"> Other hours</label>
@@ -613,8 +682,17 @@ async function schedule() {
       <td>${esc(changeText(c))}${c.note ? `<div class="quiet">${esc(c.note)}</div>` : ""}</td><td class="quiet">${esc(c.createdBy.replace(/^(admin|driver):/, ""))}</td>
       <td class="actions"><button class="danger" data-act="rm-ch">Remove</button></td></tr>`).join("")}</tbody></table>
       <p class="quiet">When changes overlap, the newest one counts.</p>` : '<p class="quiet">No changes. Every day has the usual hours.</p>'}</div>`;
+  drawCalendar();
   const form = $("#sch");
-  form.addEventListener("change", () => { $("#sch-hours").hidden = form.kind.value === "closed"; });
+  form.addEventListener("change", (e) => {
+    $("#sch-hours").hidden = form.kind.value === "closed";
+    if (e.target.name === "from" || e.target.name === "to") {
+      cal.from = form.from.value || null;
+      cal.to = form.to.value && form.to.value > form.from.value ? form.to.value : null;
+      if (cal.from) cal.at = cal.from;
+      drawCalendar();
+    }
+  });
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = new FormData(form);
@@ -634,8 +712,20 @@ async function schedule() {
     open("schedule");
   });
   main.addEventListener("click", async (e) => {
-    if (e.target.dataset.act !== "rm-ch") return;
-    const id = e.target.closest("[data-ch]").dataset.ch;
+    const t = e.target.closest("button");
+    if (!t) return;
+    if (t.dataset.calDay) { calPick(t.dataset.calDay); form.scrollIntoView({ behavior: "smooth", block: "nearest" }); return; }
+    if (t.dataset.calView) { cal.view = t.dataset.calView; main.querySelectorAll("[data-cal-view]").forEach((b) => (b.className = b.dataset.calView === cal.view ? "on" : "ghost")); drawCalendar(); return; }
+    if (t.dataset.calMove) {
+      const n = Number(t.dataset.calMove);
+      if (cal.view === "week") cal.at = shiftDay(cal.at, 7 * n);
+      else { const d = new Date(`${cal.at.slice(0, 7)}-15T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); cal.at = isoDay(d); }
+      drawCalendar();
+      return;
+    }
+    if (t.dataset.calToday != null) { cal.at = first; drawCalendar(); return; }
+    if (t.dataset.act !== "rm-ch") return;
+    const id = t.closest("[data-ch]").dataset.ch;
     if (confirm("Remove this change? Those days go back to the hours under it.") && (await act(() => api(`/api/admin/schedule/${id}`, { method: "DELETE" }), "Removed"))) open("schedule");
   });
 }
@@ -657,7 +747,7 @@ async function announce() {
       ${senders.length ? `<table><tbody>${senders.map((s) => `<tr data-sender="${esc(s.number)}"><td>${esc(s.name)}</td><td>${esc(s.number)}</td><td class="actions"><button class="ghost" data-act="rm-sender">Remove</button></td></tr>`).join("")}</tbody></table>` : '<p class="quiet">Nobody yet.</p>'}
       <form id="sender" class="row"><input name="name" placeholder="Name" required><input name="number" placeholder="Phone number" required><button>Add</button></form></div>
     <div class="card"><h2>Sent</h2>${list.length ? `<table><thead><tr><th>When</th><th>From</th><th>Message</th><th>Deliveries</th></tr></thead><tbody>${list.map((a) => `
-      <tr><td>${esc(new Date(a.created_at).toLocaleString())}</td><td>${esc(a.from || "")}</td><td>${esc(a.text)}${a.recording ? '<div class="quiet">with recording</div>' : ""}</td>
+      <tr><td>${esc(stampText(a.created_at))}</td><td>${esc(a.from || "")}</td><td>${esc(a.text)}${a.recording ? '<div class="quiet">with recording</div>' : ""}</td>
       <td>${a.deliveries} · reached ${a.reached} · not reached ${a.not_reached}</td></tr>`).join("")}</tbody></table>` : '<p class="quiet">Nothing yet.</p>'}</div>`;
   $("#ann").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -754,6 +844,19 @@ async function settings() {
         <label>Minutes at each stop <input type="number" name="stop" min="0" max="10" value="${s.stopMinutes}"></label></div>
       <label>Service areas (one per line) <textarea name="areas" rows="3">${esc(s.serviceAreas.join("\n"))}</textarea></label>
       <button>Save</button></form></div>
+    <div class="card"><h2>Seats</h2><form id="seatset">
+      <label class="opt"><input type="radio" name="seatRows" value="rows" ${s.seatRows !== false ? "checked" : ""}> <b>The system arranges the seats</b>
+        <span class="quiet">Front seat one man; rows 2 and 3 hold 3 each, men and women in their own rows. A ride that doesn't fit the rows asks the driver first.</span></label>
+      <label class="opt"><input type="radio" name="seatRows" value="count" ${s.seatRows === false ? "checked" : ""}> <b>Just count the seats</b>
+        <span class="quiet">The system only makes sure there are no more than 7 people in the van. The driver sees how many men and women are in the van and seats them himself.</span></label>
+    </form></div>
+    <div class="card"><h2>Phone booking</h2><form id="phoneset">
+      <p class="quiet">After the caller types the place they go from or to:</p>
+      <label class="opt"><input type="radio" name="say" value="no" ${!s.phoneSayPlace ? "checked" : ""}> <b>Just go on</b>
+        <span class="quiet">A short "<span dir="rtl">גוט, באקומען</span>" and the next question right away. The places are said once, at the end.</span></label>
+      <label class="opt"><input type="radio" name="say" value="yes" ${s.phoneSayPlace ? "checked" : ""}> <b>Say the place back</b>
+        <span class="quiet">"<span dir="rtl">פון ...</span>" or "<span dir="rtl">קיין ...</span>" with the place's name, then the next question (as it was before).</span></label>
+    </form></div>
     <div class="card"><h2>Drivers</h2><table><tbody>${drivers.map((d) => `<tr data-driver="${esc(d.id)}"><td>${driverLine(d)}</td><td>${esc(d.phone)}</td>
         <td class="actions"><button class="ghost" data-act="pin">${d.has_pin ? "New PIN" : "Set PIN"}</button>
         <button class="ghost" data-act="drv-status" data-status="${d.status === "offline" ? "online" : "offline"}">Set ${d.status === "offline" ? "online" : "offline"}</button></td></tr>`).join("") || '<tr><td class="quiet">No driver yet.</td></tr>'}</tbody></table>
@@ -771,6 +874,9 @@ async function settings() {
       serviceAreas: f.get("areas").split("\n").map((x) => x.trim()).filter(Boolean),
     } }), "Saved");
   });
+  // The two choices save as soon as one is picked.
+  $("#seatset").addEventListener("change", (e) => act(() => api("/api/admin/settings", { method: "PUT", body: { seatRows: e.target.value === "rows" } }), "Saved"));
+  $("#phoneset").addEventListener("change", (e) => act(() => api("/api/admin/settings", { method: "PUT", body: { phoneSayPlace: e.target.value === "yes" } }), "Saved"));
   $("#drv").addEventListener("submit", async (e) => { e.preventDefault(); if (await act(() => api("/api/admin/drivers", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Driver added")) open("settings"); });
   $("#adm").addEventListener("submit", async (e) => { e.preventDefault(); if (await act(() => api("/api/admin/admins", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Admin added")) open("settings"); });
   $("#pw").addEventListener("submit", async (e) => { e.preventDefault(); if (await act(() => api("/api/admin/password", { method: "POST", body: Object.fromEntries(new FormData(e.target)) }), "Password changed")) e.target.reset(); });

@@ -179,6 +179,17 @@ export function removeChange(db, id, actor) {
   return { ok: true };
 }
 
+// The dashboard's calendar (Shloime, 2026-11-17): every day from `from` to `to` (at most 62), each with its hours and
+// breaks; days before today are marked past.
+export function calendarDays(db, settings, now, from, to) {
+  const today = localParts(now, settings.timeZone).day;
+  if (!validDay(from) || !validDay(to) || to < from) return { ok: false, error: "Choose the dates." };
+  if (daysBetween(from, to) > 61) return { ok: false, error: "At most two months at a time." };
+  const days = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) days.push({ ...dayHours(db, d, settings), breaks: dayBreaks(db, d), past: d < today, today: d === today });
+  return { ok: true, today, days };
+}
+
 // Everything the dashboard and the app show: the usual hours, the next two weeks day by day, and the changes.
 export function scheduleView(db, settings, now) {
   return {

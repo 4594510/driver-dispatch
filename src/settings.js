@@ -11,6 +11,8 @@ const EDITABLE = {
   serviceAreas: (v) => Array.isArray(v) && v.length > 0 && v.every((a) => typeof a === "string" && a.trim()),
   driverWaitMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 30,
   stopMinutes: (v) => Number.isInteger(v) && v >= 0 && v <= 10,
+  seatRows: (v) => typeof v === "boolean",
+  phoneSayPlace: (v) => typeof v === "boolean",
 };
 
 // With now: today's hours from the schedule changes are in openMinute/closeMinute (and closed is set), so every

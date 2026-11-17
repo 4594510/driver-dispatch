@@ -1,6 +1,6 @@
 // Keeps the app's own files so it opens without signal. The data (today's route) is kept by the app itself.
-const CACHE = "driver-v4";
-const FILES = ["./", "index.html", "driver.css", "driver.js", "manifest.json", "icon.svg"];
+const CACHE = "driver-v5";
+const FILES = ["./", "index.html", "driver.css", "driver.js", "timetext.js", "manifest.json", "icon.svg"];
 self.addEventListener("install", (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", (e) => {

@@ -14,6 +14,7 @@ import { timeRoute, buildRoute, fitRides, seatRoute, etas } from "./route.js";
 import { priorityOf, LEVELS } from "./priority.js";
 import { seatPeople } from "./relations.js";
 import { stopsFor } from "./stops.js";
+import { getSettings } from "./settings.js";
 
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
@@ -31,9 +32,13 @@ const oneAtATime = (fn) => (...args) => {
   return run;
 };
 
+// The van and its rows. When the admin set "just count the seats" (settings seatRows false), the layout carries
+// countOnly: route.js seatRoute then only counts heads and the driver seats people himself.
 export function vehicleFor(db) {
   const v = db.prepare("SELECT * FROM vehicles ORDER BY rowid LIMIT 1").get();
-  return { id: v?.id || "main", layout: v ? JSON.parse(v.layout) : DEFAULT_LAYOUT };
+  const layout = v ? JSON.parse(v.layout) : [...DEFAULT_LAYOUT];
+  if (getSettings(db).seatRows === false) layout.countOnly = true;
+  return { id: v?.id || "main", layout };
 }
 
 // A booking row (or a prepared ride) with its priority level (priority.js) and its named riders with their seat rules
@@ -368,7 +373,7 @@ export const acceptRide = oneAtATime(async (db, travel, id, driverId, settings =
   if (!["pending", "proposed"].includes(fresh.status)) return { ok: false, errors: ["not_pending"] };
   // The pickup time each rider already on the route was told, to see whose time this ride pushes later.
   const told = new Map(routedRows(db, b.day).filter((r) => r.status === "accepted").map((r) => [r.id, r.eta_minute ?? r.pickup_minute]));
-  db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, seat_override = ?, updated_at = ? WHERE id = ?").run(driverId, p.seatConflict ? 1 : 0, nowIso(), id);
+  db.prepare("UPDATE bookings SET status = 'accepted', driver_id = ?, seat_override = ?, updated_at = ? WHERE id = ?").run(driverId, p.seatConflict || p.layout?.countOnly ? 1 : 0, nowIso(), id);
   saveRoute(db, b.day, p.after.stops, p.after.timing, p.after.seats);
   db.prepare("UPDATE bookings SET told_minute = eta_minute WHERE id = ?").run(id); // the time the "accepted" message gives
   const moved = [...told].map(([rid, was]) => ({ was, booking: getBooking(db, rid) }))
@@ -449,7 +454,7 @@ export async function autoRoute(db, travel, day, settings = DEFAULT_SETTINGS, no
 export function dayRoute(db, day) {
   const v = vehicleFor(db);
   const row = db.prepare("SELECT * FROM routes WHERE day = ? AND vehicle_id = ?").get(day, v.id);
-  if (!row) return { day, stops: [], driveMinutes: 0, estimated: false, seatsByStop: [] };
+  if (!row) return { day, stops: [], driveMinutes: 0, estimated: false, seatsByStop: [], countOnly: !!v.layout.countOnly };
   const stops = JSON.parse(row.stops).map((s) => {
     const b = getBooking(db, s.booking_id);
     const pr = b ? priorityOf(db, b) : { level: 0, label: LEVELS[0] };
@@ -482,5 +487,6 @@ export function dayRoute(db, day) {
     estimated: !!row.estimated,
     updatedAt: row.updated_at,
     seatsByStop: seatsByStop(seatRows, plan, v.layout).filter((s) => s.stop >= 0),
+    countOnly: !!v.layout.countOnly,
   };
 }

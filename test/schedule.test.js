@@ -192,3 +192,22 @@ test("the admin and the driver app set and remove schedule changes", async () =>
     server.close();
   }
 });
+
+test("the dashboard calendar: each day of a week or month with its hours and breaks; past days marked", async () => {
+  const { calendarDays, addBreak } = await import("../src/schedule.js");
+  const db = setup();
+  const s = getSettings(db);
+  addChange(db, { from: "2026-11-13", closed: true }, "admin:test", s, now);
+  addBreak(db, { day: "2026-11-12", startMinute: 780, endMinute: 810 }, "driver:d", s, now);
+  const r = calendarDays(db, s, now, "2026-11-08", "2026-12-19");
+  assert.ok(r.ok);
+  assert.equal(r.days.length, 42);
+  const by = Object.fromEntries(r.days.map((d) => [d.day, d]));
+  assert.equal(by["2026-11-10"].past, true);
+  assert.equal(by["2026-11-11"].today, true);
+  assert.equal(by["2026-11-13"].closed, true);
+  assert.deepEqual(by["2026-11-12"].breaks.map((b) => [b.startMinute, b.endMinute]), [[780, 810]]);
+  assert.equal(by["2026-11-14"].openMinute, s.openMinute);
+  assert.equal(calendarDays(db, s, now, "2026-11-08", "2027-03-01").ok, false, "at most two months");
+  assert.equal(calendarDays(db, s, now, "nope", "2026-11-09").ok, false);
+});

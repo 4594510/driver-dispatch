@@ -32,7 +32,7 @@ import path from "node:path";
 export const WEB_VERSION = (() => {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "driver");
   const h = crypto.createHash("sha256");
-  for (const f of ["index.html", "driver.js", "driver.css"]) {
+  for (const f of ["index.html", "driver.js", "driver.css", "timetext.js"]) {
     try { h.update(fs.readFileSync(path.join(dir, f))); } catch { /* missing in a test */ }
   }
   return h.digest("hex").slice(0, 12);
@@ -418,6 +418,17 @@ export function todayFor(db, here) {
     const place = s.kind === "pickup" ? placeName(db, b?.pickup_place_id, b?.pickup_address) : placeName(db, b?.dropoff_place_id, b?.dropoff_address);
     stops.push({ ...rest, ...e, lat, lng, place, index: stops.length, seatsHere: route.seatsByStop.find((x) => x.stop === i)?.rows || null });
   });
+  // Men and women in the van after each stop: with the admin's "just count the seats" setting (seatRows off) the
+  // driver seats people himself and sees these numbers instead of rows (Shloime, 2026-11-17).
+  const picks = new Set(stops.filter((s) => s.kind === "pickup").map((s) => s.booking_id));
+  const load = { men: 0, women: 0 };
+  for (const s of stops) if (s.kind === "dropoff" && !picks.has(s.booking_id)) { load.men += s.men || 0; load.women += s.women || 0; }
+  for (const s of stops) {
+    const sign = s.kind === "pickup" ? 1 : s.kind === "dropoff" ? -1 : 0;
+    load.men += sign * (s.men || 0);
+    load.women += sign * (s.women || 0);
+    s.onBoardAfter = { men: load.men, women: load.women };
+  }
   const next = stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind !== "pickup" && s.status === "picked_up")) || null;
   const requests = db
     .prepare("SELECT * FROM bookings WHERE day = ? AND status IN ('pending', 'proposed') ORDER BY pickup_minute")
@@ -448,6 +459,7 @@ export function todayFor(db, here) {
     next,
     requests,
     rides,
+    seatRows: getSettings(db).seatRows !== false,
   };
 }
 
