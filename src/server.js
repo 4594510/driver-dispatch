@@ -24,6 +24,7 @@ import { createAnnouncement, listAnnouncements, listSenders, addSender, removeSe
 import { localParts } from "./rules.js";
 import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
+import { stopsView } from "./stops.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { createAppRelease } from "./appupdate.js";
 import { driverRouter, setPin, driverNow, setDriverStatus, forgetIfHidden, notSharedReason, placeName } from "./driver.js";
@@ -440,7 +441,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
     res.json(rows.map((b) => {
       const p = priorityOf(db, b);
       return { ...b, priority: p.level, priority_label: p.label,
-        pickup_name: placeName(db, b.pickup_place_id, b.pickup_address), dropoff_name: placeName(db, b.dropoff_place_id, b.dropoff_address) };
+        pickup_name: placeName(db, b.pickup_place_id, b.pickup_address), dropoff_name: placeName(db, b.dropoff_place_id, b.dropoff_address),
+        stops: stopsView(db, b.id) };
     }));
   });
   admin.post("/bookings", async (req, res) => {

@@ -15,6 +15,7 @@ import { localParts } from "./rules.js";
 import { getSettings } from "./settings.js";
 import { scheduleView, addChange, removeChange, dayHours, addBreak, removeBreak } from "./schedule.js";
 import { priorityOf } from "./priority.js";
+import { addStop, removeStop, stopDone, stopsView, stopsFor } from "./stops.js";
 
 const priorityFields = (db, b) => {
   const p = priorityOf(db, b);
@@ -280,6 +281,25 @@ export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
     res.status(p.ok ? 200 : 400).json(p.ok || p.before ? { ...p, names: namesFor(db, p) } : p);
   });
 
+  // Stops on the way of a ride (2026-11-17, "add stops"): add one (a saved place or an address), take one off, or
+  // "Done here". A ride already on the route is re-timed at once.
+  const afterStop = async (out) => {
+    if (out.ok && out.routed) {
+      const c = ctxFor();
+      await refreshDay(db, c.travel, out.day, c.settings, c.now);
+    }
+    return out;
+  };
+  r.post("/bookings/:id/stops", once(async (req) => {
+    const c = ctxFor();
+    const b = req.body || {};
+    const where = b.placeId ? { placeId: String(b.placeId) } : { address: String(b.address || "") };
+    const out = await addStop(db, c.travel, req.params.id, where, req.actor, extra.checkAddress);
+    return afterStop(out.ok ? { ok: true, stop: { id: out.stop.id, address: out.stop.address }, routed: out.routed, day: out.day } : out);
+  }));
+  r.post("/stops/:id/remove", once(async (req) => afterStop(removeStop(db, req.params.id, req.actor))));
+  r.post("/stops/:id/done", once(async (req) => afterStop(stopDone(db, req.params.id, req.actor))));
+
   r.post("/bookings/:id/:action", once(async (req) => {
     const { id, action } = req.params;
     if (!DRIVER_ACTIONS.includes(action)) return { ok: false, errors: ["unknown_action"] };
@@ -378,14 +398,27 @@ export function todayFor(db, here) {
     const p = b?.passenger_id ? db.prepare("SELECT notes FROM passengers WHERE id = ?").get(b.passenger_id) : null;
     return { phone: b?.booked_by_phone, caller: callerOf(db, b), notes: p?.notes || "", together: !!b?.together, asked: b ? b.asked_minute ?? b.pickup_minute : null, told: b?.told_minute ?? null, b };
   };
-  const stops = route.stops.map((s, i) => {
+  const stops = [];
+  route.stops.forEach((s, i) => {
     const { b, ...e } = extra(s.booking_id);
+    // Stops on the way still to do come right before the ride's drop-off (kind "stop", with "Done here").
+    const { via, ...rest } = s;
+    if (s.kind === "dropoff" && via?.length) {
+      const all = new Map(stopsFor(db, s.booking_id).map((x) => [x.id, x]));
+      const names = new Map(stopsView(db, s.booking_id).map((x) => [x.id, x.place]));
+      for (const v of via) {
+        const st = all.get(v.stop_id);
+        if (!st || st.done_at) continue;
+        stops.push({ ...rest, ...e, kind: "stop", stop_id: st.id, stop_n: st.n, arrive: v.arrive, depart: v.arrive, address: st.address, place: names.get(st.id) || "",
+          lat: st.lat, lng: st.lng, index: stops.length, seatsHere: null });
+      }
+    }
     const lat = s.kind === "pickup" ? b?.pickup_lat : b?.dropoff_lat;
     const lng = s.kind === "pickup" ? b?.pickup_lng : b?.dropoff_lng;
     const place = s.kind === "pickup" ? placeName(db, b?.pickup_place_id, b?.pickup_address) : placeName(db, b?.dropoff_place_id, b?.dropoff_address);
-    return { ...s, ...e, lat, lng, place, index: i, seatsHere: route.seatsByStop.find((x) => x.stop === i)?.rows || null };
+    stops.push({ ...rest, ...e, lat, lng, place, index: stops.length, seatsHere: route.seatsByStop.find((x) => x.stop === i)?.rows || null });
   });
-  const next = stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind === "dropoff" && s.status === "picked_up")) || null;
+  const next = stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind !== "pickup" && s.status === "picked_up")) || null;
   const requests = db
     .prepare("SELECT * FROM bookings WHERE day = ? AND status IN ('pending', 'proposed') ORDER BY pickup_minute")
     .all(here.day)
@@ -394,7 +427,7 @@ export function todayFor(db, here) {
       from: b.pickup_address, to: b.dropoff_address, from_name: placeName(db, b.pickup_place_id, b.pickup_address),
       to_name: placeName(db, b.dropoff_place_id, b.dropoff_address), window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
       proposed_minute: b.proposed_minute, phone: b.booked_by_phone, caller: callerOf(db, b), return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
-      told: b.told_minute,
+      told: b.told_minute, stops: stopsView(db, b.id),
       ...priorityFields(db, b),
     }))
     // By the time shown (the offered time for one waiting for the caller), earliest on top (driver feedback,
@@ -437,7 +470,7 @@ export function rideOf(db, b, dropoffAt = new Map()) {
     return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
     // On board: the drop-off time counts now, not the pickup (driver feedback, 2026-11-16).
     dropoff_eta: dropoffAt.get(b.id) ?? b.eta_dropoff_minute ?? null, phone: b.booked_by_phone, caller: callerOf(db, b),
-    picked_up: b.picked_up_minute ?? null, dropped_off: b.dropped_off_minute ?? null,
+    picked_up: b.picked_up_minute ?? null, dropped_off: b.dropped_off_minute ?? null, stops: stopsView(db, b.id),
   };
 }
 

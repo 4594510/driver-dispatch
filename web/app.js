@@ -138,7 +138,9 @@ async function home() {
 
 // Pickup on the left, drop-off on the right (Shloime, 2026-11-17).
 const ftEnd = (cls, label, name, addr) => `<div class="ft ${cls}"><span class="ft-label">${label}</span>${name ? `<b dir="auto">${esc(name)}</b>` : ""}<span dir="auto">${esc(addr)}</span></div>`;
-const fromTo = (b) => `<div class="fromto">${ftEnd("from", "Pickup", b.pickup_name, b.pickup_address)}<span class="ft-arrow">→</span>${ftEnd("to", "Drop-off", b.dropoff_name, b.dropoff_address)}</div>`;
+const fromTo = (b) => `<div class="fromto">${ftEnd("from", "Pickup", b.pickup_name, b.pickup_address)}<span class="ft-arrow">→</span>${ftEnd("to", "Drop-off", b.dropoff_name, b.dropoff_address)}</div>` + viaLine(b);
+// Stops on the way that the driver added (pick up, these in order, then drop off).
+const viaLine = (b) => (b.stops?.length ? `<div class="quiet">Stops on the way: ${b.stops.map((x) => `${x.done ? "✓ " : `${x.n}. `}${esc(x.place ? `${x.place}, ${x.address}` : x.address)}`).join(" · ")}</div>` : "");
 
 // ---------- bookings ----------
 function bookingTable(rows, { showDay = false } = {}) {

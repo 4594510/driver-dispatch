@@ -13,6 +13,7 @@ import { pointKey } from "./travel.js";
 import { timeRoute, buildRoute, fitRides, seatRoute, etas } from "./route.js";
 import { priorityOf, LEVELS } from "./priority.js";
 import { seatPeople } from "./relations.js";
+import { stopsFor } from "./stops.js";
 
 export const ROUTED = ["accepted", "picked_up"];
 const DRIVER_FRESH_MINUTES = 10;
@@ -36,8 +37,8 @@ export function vehicleFor(db) {
 }
 
 // A booking row (or a prepared ride) with its priority level (priority.js) and its named riders with their seat rules
-// (relations.js) filled in.
-export const withPriority = (db, row) => ({ ...row, priority: priorityOf(db, row).level, people: seatPeople(db, row) });
+// (relations.js) and its stops on the way (stops.js) filled in.
+export const withPriority = (db, row) => ({ ...row, priority: priorityOf(db, row).level, people: seatPeople(db, row), ride_stops: stopsFor(db, row.id) });
 
 // A booking row (or a prepared ride) as the planner sees it.
 export function rideOf(row) {
@@ -56,6 +57,8 @@ export function rideOf(row) {
     pickedUpAt: row.picked_up_minute ?? undefined,
     priority: row.priority ?? 0,
     seatOverride: !!row.seat_override,
+    via: (row.ride_stops || []).filter((s) => !s.done_at && s.lat != null).map((s) => ({ id: s.id, at: pointKey(s.lat, s.lng) })),
+    hasStops: !!row.ride_stops?.length,
   };
 }
 
@@ -119,6 +122,7 @@ async function prefetch(db, travel, rides, ctx) {
   for (const r of rides) {
     pts.push({ k: r.from, t: r.windowStart });
     pts.push({ k: r.to, t: r.windowEnd + 15 });
+    for (const v of r.via || []) pts.push({ k: v.at, t: r.windowEnd + 10 });
   }
   const legs = [];
   for (const a of pts) {
@@ -196,7 +200,12 @@ function shifts(before, beforeStops, after, afterStops) {
 function saveRoute(db, day, stops, timing, seats) {
   const v = vehicleFor(db);
   const at = nowIso();
-  const rows = stops.map((s, i) => ({ booking_id: s.ride, kind: s.kind, arrive: Math.round(timing.times[i].arrive), depart: Math.round(timing.times[i].depart) }));
+  const rows = stops.map((s, i) => {
+    const t = timing.times[i];
+    const row = { booking_id: s.ride, kind: s.kind, arrive: Math.round(t.arrive), depart: Math.round(t.depart) };
+    if (t.via) row.via = t.via.map((v) => ({ stop_id: v.id, arrive: Math.round(v.arrive) }));
+    return row;
+  });
   db.prepare(`INSERT INTO routes (day, vehicle_id, stops, drive_minutes, estimated, updated_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(day, vehicle_id) DO UPDATE SET stops = excluded.stops, drive_minutes = excluded.drive_minutes,
     estimated = excluded.estimated, updated_at = excluded.updated_at`).run(day, v.id, JSON.stringify(rows), Math.round(timing.drive), timing.estimated ? 1 : 0, at);

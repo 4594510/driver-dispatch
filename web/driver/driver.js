@@ -32,6 +32,8 @@ const ERRORS = {
   no_dropoff: "Choose where to.", outside_hours: "That time is outside today's hours.", closed: "There are no rides today.",
   in_past: "That time already passed.", driver_break: "That time is inside one of your breaks.", too_far: "That trip is longer than 30 minutes.",
   full: "The van is full then.", no_seating: "The seats don't work for this.",
+  too_many_stops: "A ride can have up to 5 stops.", no_place: "Choose a place or type an address.", not_on_map: "Google Maps can't find that address.",
+  stop_done: "That stop is already done.",
 };
 const errText = (data) => (data?.errors || []).map((e) => ERRORS[e] || e).join(" ") || data?.error || "Something went wrong.";
 
@@ -315,11 +317,14 @@ function mapsWeb(s) {
 // The admin's priority level for a rider (High or Top); nothing for normal.
 const prioBadge = (x) => (x?.priority > 0 ? ` <span class="prio p${x.priority}">${esc(x.priority_label || "High")} priority</span>` : "");
 
+const KIND = { pickup: "Pick up", dropoff: "Drop off", stop: "Stop on the way" };
+
 // A stop: what to do, when, who and where. The next stop is big, with one big button for what comes next.
 function stopCard(s, big) {
   const pickup = s.kind === "pickup";
+  const via = s.kind === "stop";
   return `<div class="card ${big ? "next" : ""}">
-    <div class="kind ${s.kind} ${big ? "huge" : ""}">${pickup ? "Pick up" : "Drop off"} · ${minuteText(s.arrive)}</div>
+    <div class="kind ${s.kind === "stop" ? "waypoint" : s.kind} ${big ? "huge" : ""}">${KIND[s.kind]} · ${minuteText(s.arrive)}</div>
     <h2>${esc(s.rider_name || "Ride")}${prioBadge(s)}</h2>
     ${callerLine(s)}
     ${pickup ? timesLine(s, s.arrive) : ""}
@@ -329,6 +334,7 @@ function stopCard(s, big) {
     ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
     ${big ? `
       ${pickup ? `<button class="good huge-btn" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
+        : via ? `<button class="good huge-btn" data-stop-done="${s.stop_id}">Done here</button>`
         : `<button class="good huge-btn" data-act="done" data-id="${s.booking_id}">Dropped off</button>`}
       <div class="actions">
         <a href="${native ? navLink(s) : mapsWeb(s)}"><button class="ghost big" style="margin:0">Navigate</button></a>
@@ -401,6 +407,19 @@ async function fetchPreviews() {
 // easier to see"). Left stays left even for a Yiddish address (direction ltr on the pair, dir=auto on each address).
 const endBox = (cls, label, name, addr) => `<div class="ft ${cls}"><span class="ft-label">${label}</span>${name ? `<span class="ft-name" dir="auto">${esc(name)}</span>` : ""}<span class="ft-addr" dir="auto">${esc(addr)}</span></div>`;
 const fromTo = (r) => `<div class="fromto">${endBox("from", "Pick up", r.from_name, r.from)}<div class="ft-arrow">→</div>${endBox("to", "Drop off", r.to_name, r.to)}</div>`;
+// A ride's stops on the way (pick up, these in order, then drop off), each with Remove while it isn't done, and
+// "+ Add a stop" while the ride is still open (2026-11-17, "add stops").
+const OPEN_RIDE = ["pending", "proposed", "accepted", "picked_up"];
+function stopsLine(r) {
+  const open = OPEN_RIDE.includes(r.status);
+  const list = (r.stops || []).map((x) => `<div class="via ${x.done ? "done" : ""}"><span class="via-n">${x.done ? "✓" : x.n}</span>
+    <span class="via-text" dir="auto">${x.place ? `<b>${esc(x.place)}</b> · ` : ""}${esc(x.address)}</span>
+    ${open && !x.done ? `<button class="link" data-stop-remove="${x.id}">Remove</button>` : ""}</div>`).join("");
+  return `${list ? `<div class="vias"><div class="ft-label">Stops on the way</div>${list}</div>` : ""}${open ? `<div class="add-stop"><button class="ghost small" data-stop-add="${r.id}">+ Add a stop</button></div>` : ""}`;
+}
+// The stops of a ride from today's lists (for the route's own rows).
+const rideStops = (id) => [...(today?.requests || []), ...(today?.rides || [])].find((r) => r.id === id)?.stops;
+
 // A stop's place: the saved place's name with its address under it (Shloime, 2026-11-17).
 const placeAddr = (s, cls = "addr") => `${s.place ? `<div class="${cls}" dir="auto"><b>${esc(s.place)}</b></div>` : ""}<div class="${cls}" dir="auto">${esc(s.address)}</div>`;
 
@@ -412,6 +431,7 @@ function requestCard(r) {
     <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     ${callerLine(r)}
     ${fromTo(r)}
+    ${stopsLine(r)}
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
     ${timesLine(r, gpsFor(r))}
     ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
@@ -450,17 +470,18 @@ function routePane() {
 }
 function stopRow(s) {
   return `<div class="stop"><div class="time">${minuteText(s.arrive)}</div>
-    <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
+    <div class="body"><div class="kind ${s.kind === "stop" ? "waypoint" : s.kind}">${KIND[s.kind]}</div>
       <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}${placeAddr(s, "quiet")}
       ${callerLine(s)}${s.kind === "pickup" ? timesLine(s, s.arrive) : ""}
       <div class="row-actions">${s.kind === "pickup" ? `<button class="ghost small" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
+        : s.kind === "stop" ? `<button class="ghost small" data-stop-done="${s.stop_id}">Done here</button>`
         : `<button class="ghost small" data-act="done" data-id="${s.booking_id}">Dropped off</button>`}</div></div></div>`;
 }
 function orderEditor() {
   const stops = reorder;
   return `<div class="card list">${stops.map((s, i) => `<div class="stop">
-      <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-        <b>${esc(s.rider_name)}</b> · ${people(s)}${placeAddr(s, "quiet")}</div>
+      <div class="body"><div class="kind ${s.kind === "stop" ? "waypoint" : s.kind}">${KIND[s.kind]}</div>
+        <b>${esc(s.rider_name)}</b> · ${people(s)}${placeAddr(s, "quiet")}${s.kind === "dropoff" && (rideStops(s.booking_id) || []).some((x) => !x.done) ? '<div class="quiet">Its stops on the way come right before it.</div>' : ""}</div>
       <div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>
     </div>`).join("")}</div>
     <div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`;
@@ -505,7 +526,7 @@ function rideRow(r, reopen = true) {
     : finished && reopen ? `<div class="row-actions"><button class="ghost small" data-act="reopen" data-id="${r.id}">Open again</button></div>` : "";
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(time)}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
-      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div>${fromTo(r)}
+      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div>${fromTo(r)}${reopen || !finished ? stopsLine(r) : stopsLine({ ...r, status: "done" })}
       ${callerLine(r)}
       ${timesLine(r, r.status === "accepted" ? r.eta : null)}
       ${onBoard ? `<div class="times">Drop off${r.dropoff_eta != null ? ` about <b>${minuteText(r.dropoff_eta)}</b>` : ""}</div>` : ""}
@@ -826,6 +847,25 @@ async function saveRide() {
   await take(r.id);
 }
 
+// A stop on the way of a ride: a saved place or a typed address. It goes after the ride's other stops.
+async function addStopSheet(id) {
+  sheet('<p class="quiet">Loading…</p>');
+  try { const r = await api("/api/driver/book-options"); if (r.ok) bookOptions = r.data; } catch { /* no signal */ }
+  if (!bookOptions) { info("No signal. Adding a stop needs signal."); return; }
+  sheet(`<h2>Add a stop on the way</h2><p class="quiet">Pick up, then the stops in order, then drop off. The riders stay in the car.</p>
+    <form id="stop-form" onsubmit="return false">
+    <label>Place <select name="place"><option value="">Type an address below</option>${bookOptions.places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} · ${esc(p.name)}</option>`).join("")}</select></label>
+    <input name="address" maxlength="200" placeholder="Or an address, e.g. 12 Main St, Monsey">
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-stop-save="${esc(id)}">Add the stop</button></div></form>`);
+}
+async function saveStop(id) {
+  const f = new FormData($("#stop-form"));
+  const body = f.get("place") ? { placeId: f.get("place") } : { address: String(f.get("address") || "").trim() };
+  if (!body.placeId && !body.address) { toast("Choose a place or type an address."); return; }
+  const r = await act(`/api/driver/bookings/${id}/stops`, body, { queueable: false, ok: "Stop added" });
+  if (r?.ok) closeSheet();
+}
+
 // The driver adds a saved place with its code (driver feedback, 2026-11-16). Everyone can use it on the phone.
 function addPlaceSheet() {
   sheet(`<h2>Add a place</h2><form id="place-form" onsubmit="return false">
@@ -883,7 +923,10 @@ async function everyoneSheet() {
 function markLocal(id, status) {
   if (!today) return;
   for (const s of today.route.stops) if (s.booking_id === id) s.status = status;
-  today.next = today.route.stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind === "dropoff" && s.status === "picked_up")) || null;
+  nextLocal();
+}
+function nextLocal() {
+  today.next = today.route.stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind !== "pickup" && s.status === "picked_up")) || null;
   store.set("driver.today", today);
 }
 
@@ -898,6 +941,22 @@ document.addEventListener("click", async (e) => {
   if (ds.dayHours || ds.dayClosed) { schKind = ds.dayHours ? "hours" : "closed"; const d = ds.dayHours || ds.dayClosed; scheduleSheet({ from: d, to: d }); return; }
   if (ds.dayUsual) return usualDay(ds.dayUsual);
   if (ds.addRide != null) return addRideSheet();
+  if (ds.stopAdd) return addStopSheet(ds.stopAdd);
+  if (ds.stopSave) return saveStop(ds.stopSave);
+  if (ds.stopRemove) {
+    if (!(await ask("Remove this stop?", "Remove", true))) return;
+    await act(`/api/driver/stops/${ds.stopRemove}/remove`, {}, { queueable: false, ok: "Stop removed" });
+    return;
+  }
+  if (ds.stopDone) {
+    // Works without signal too: the stop leaves the route on the phone now, and the press is sent later.
+    today.route.stops = today.route.stops.filter((s) => s.stop_id !== ds.stopDone);
+    nextLocal();
+    store.set("driver.today", today);
+    render();
+    await act(`/api/driver/stops/${ds.stopDone}/done`, {}, { ok: "Done here" });
+    return;
+  }
   if (ds.rideSave != null) return saveRide();
   if (ds.addPlace != null) return addPlaceSheet();
   if (ds.placeSave != null) return savePlace();
@@ -979,7 +1038,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (ds.lateBy) { closeSheet(); await act("/api/driver/late", { minutes: Number(ds.lateBy) }, { ok: "Riders told" }); return; }
-  if (ds.reorder != null) { reorder = today.route.stops.filter((s) => ["accepted", "picked_up"].includes(s.status) && !(s.kind === "pickup" && s.status === "picked_up")).map((s) => ({ ...s })); render(); return; }
+  if (ds.reorder != null) { reorder = today.route.stops.filter((s) => s.kind !== "stop" && ["accepted", "picked_up"].includes(s.status) && !(s.kind === "pickup" && s.status === "picked_up")).map((s) => ({ ...s })); render(); return; }
   if (ds.reorderCancel != null) { reorder = null; render(); return; }
   if (ds.up || ds.down) {
     const i = Number(ds.up ?? ds.down);

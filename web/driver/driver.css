@@ -1,10 +1,10 @@
 :root {
   --bg: #f6f6f4; --card: #fff; --ink: #1d1d1b; --quiet: #6b6b66; --line: #deded8;
-  --accent: #1f5fbf; --good: #1d7a3e; --warn: #a15c00; --bad: #b3261e; --soft: #eef3fb; --soft-good: #e8f4ec;
+  --accent: #1f5fbf; --good: #1d7a3e; --warn: #a15c00; --bad: #b3261e; --soft: #eef3fb; --soft-good: #e8f4ec; --soft-warn: #fff6e5;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); font-size: 18px;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #161615; --card: #20201e; --ink: #ecece8; --quiet: #a0a09a; --line: #34342f; --accent: #6ea2ff; --soft: #24304a; --soft-good: #1f3326; }
+  :root { --bg: #161615; --card: #20201e; --ink: #ecece8; --quiet: #a0a09a; --line: #34342f; --accent: #6ea2ff; --soft: #24304a; --soft-good: #1f3326; --soft-warn: #3a2d17; }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -29,6 +29,17 @@ h1 { font-size: 22px; margin: 0 0 12px; }
 h2 { font-size: 19px; margin: 0 0 6px; }
 .kind { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
 .kind.dropoff { color: var(--good); }
+.kind.waypoint { color: var(--warn); }
+.vias { margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--soft-warn); direction: ltr; }
+.vias .ft-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--warn); }
+@media (prefers-color-scheme: dark) { .kind.waypoint, .vias .ft-label { color: #e0a24a; } }
+.via { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+.via.done { color: var(--quiet); }
+.add-stop { margin: 4px 0 6px; overflow: hidden; }
+.add-stop button.small { float: none; margin: 0; }
+.via-n { font-weight: 700; min-width: 1.2em; }
+.via-text { flex: 1; min-width: 0; unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.via .link { flex: none; width: auto; margin: 0; padding: 0 4px; }
 .addr { font-size: 18px; margin: 4px 0 8px; }
 .quiet { color: var(--quiet); font-size: 15px; }
 .late { color: var(--bad); font-weight: 600; }

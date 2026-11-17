@@ -110,6 +110,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 - Every ride shows where from and where to side by side, pickup on the left, drop-off on the right (Shloime, 2026-11-17),
   in the driver app and the dashboard's ride tables; left stays left for a Yiddish address (fromTo in driver.js, app.js).
   A saved place always shows its name with its full address under it (driver.js placeName).
+- Stops on the way (Shloime and the driver, 2026-11-17, "add stops"): the driver adds stops to any open ride (app, "+ Add a
+  stop": a saved place or an address; up to 5; ride_stops table, src/stops.js). Pick up, the stops in order, then drop off;
+  the riders stay on board (seats unchanged), and the planner drives them right before the drop-off (route.js ride.via).
+  Each shows in the route as "Stop on the way" with "Done here"; a ride already taken is re-timed at once. A ride with
+  stops has no 30-minute on-board limit. The dashboard's ride tables list them. Not on the phone.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
@@ -119,6 +124,7 @@ The full plan, spec decisions and the phone setup live in the project's build pl
 ## Map
 - src/seating.js: seat plans across a whole route, seats by stop.
 - src/rules.js: hours, windows, keypad times, change cut-off.
+- src/stops.js: stops on the way of a ride (add, remove, done); route.js drives them before the drop-off.
 - src/bookings.js: checking and saving ride requests (prepareRide, saveRides), propose time, status changes.
 - src/travel.js: Google Geocoding (lookup checks a new address: near Monsey, more than a town) and Routes API (computeRouteMatrix, traffic by hour), cached in geocodes and
   travel_times; straight-line estimate without a key (ROUTES_TRAFFIC=off drops traffic).

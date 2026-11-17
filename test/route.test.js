@@ -123,3 +123,15 @@ test("two rides from the same place at the same time are picked up together when
     assert.deepEqual(res.stops.slice(0, 2).map((s) => s.kind), ["pickup", "pickup"], "both picked up before any drop-off");
   }
 });
+
+test("stops on the way are driven in order right before the drop-off, and a ride with stops has no trip limit", () => {
+  const a = ride("a", 0, 10, 600, { via: [{ id: "s1", at: "30" }, { id: "s2", at: "40" }], hasStops: true });
+  const stops = [{ ride: "a", kind: "pickup" }, { ride: "a", kind: "dropoff" }];
+  const t = timeRoute(stops, [a], ctx);
+  assert.deepEqual(t.times[1].via.map((v) => [v.id, v.arrive]), [["s1", 630], ["s2", 640]]);
+  assert.equal(t.times[1].arrive, 670, "0 -> 30 -> 40 -> 10");
+  assert.equal(t.drive, 70);
+  assert.deepEqual(t.over, {}, "70 minutes on board, but the caller asked for the stops");
+  // A stop already done isn't in via any more; without stops the same trip is direct.
+  assert.equal(timeRoute(stops, [ride("a", 0, 10, 600)], ctx).times[1].arrive, 610);
+});
