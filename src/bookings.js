@@ -209,6 +209,9 @@ const TRANSITIONS = {
   pickup: { from: ["accepted"], to: "picked_up" },
   done: { from: ["picked_up", "accepted"], to: "completed" },
   no_show: { from: ["accepted"], to: "no_show" },
+  // A ride closed by mistake (done, cancelled, declined, no-show) is opened again as a new request; the driver then
+  // takes it the usual way and the caller hears the time (driver feedback, 2026-11-17). Today's rides only.
+  reopen: { from: ["completed", "cancelled", "rejected", "no_show"], to: "pending" },
 };
 
 // reject / cancel / pickup / done / no_show. Seats are freed simply by the status leaving the holding set.
@@ -217,8 +220,16 @@ export function changeStatus(db, id, action, actor, now = new Date(), settings =
   const b = getBooking(db, id);
   if (!t || !b) return { ok: false, errors: ["not_found"] };
   if (!t.from.includes(b.status)) return { ok: false, errors: ["wrong_status"], status: b.status };
+  const here = localParts(now, settings.timeZone);
+  if (action === "reopen" && b.day < here.day) return { ok: false, errors: ["past_day"] };
   db.prepare("UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?").run(t.to, nowIso(), id);
-  const minute = localParts(now, settings.timeZone).minute;
+  const minute = here.minute;
+  // Its old marks and seats go; the time first asked for and the time the caller was last told stay. (A message about
+  // the old status still waiting to go out is dropped by notify.js stillTrue.)
+  if (action === "reopen") {
+    db.prepare(`UPDATE bookings SET picked_up_minute = NULL, dropped_off_minute = NULL, proposed_minute = NULL, seats = NULL,
+      seat_override = 0, eta_minute = NULL, eta_dropoff_minute = NULL WHERE id = ?`).run(id);
+  }
   if (action === "pickup") db.prepare("UPDATE bookings SET picked_up_minute = ? WHERE id = ?").run(minute, id);
   if (action === "done") db.prepare("UPDATE bookings SET dropped_off_minute = ?, picked_up_minute = coalesce(picked_up_minute, ?) WHERE id = ?").run(minute, minute, id);
   audit(db, actor, action, id, { from: b.status });

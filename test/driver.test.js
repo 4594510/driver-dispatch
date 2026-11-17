@@ -412,3 +412,55 @@ test("driver feedback 2026-11-16: who called, the drop-off time on board, done o
     assert.ok(!today.route.stops.some((s) => s.booking_id === b), "gone from the route");
   });
 });
+
+test("driver feedback 2026-11-17: open a closed ride again, finished rides of any day, every time on every ride", async () => {
+  await withDay(async ({ call, db, setToken, at }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
+    const a = (await call("/api/admin/bookings", "POST", ride({ riderName: "A" }))).body.bookings[0].id;
+    const b = (await call("/api/admin/bookings", "POST", ride({ riderName: "B", pickupMinute: 750 }))).body.bookings[0].id;
+    let today = (await call("/api/driver/today")).body;
+    assert.equal(today.requests[0].asked, 720, "a new request shows the time asked");
+    assert.equal(today.requests[0].told, null, "nothing given yet");
+    for (const id of [a, b]) await call(`/api/driver/bookings/${id}/accept`, "POST", { key: `a-${id}` });
+
+    // A is picked up at 12:05 and dropped off at 12:20; B is removed by mistake.
+    at("2026-11-11T17:05:00Z");
+    await call(`/api/driver/bookings/${a}/pickup`, "POST", { key: "p1" });
+    at("2026-11-11T17:20:00Z");
+    await call(`/api/driver/bookings/${a}/done`, "POST", { key: "d1" });
+    await call(`/api/driver/bookings/${b}/cancel`, "POST", { key: "c1" });
+    today = (await call("/api/driver/today")).body;
+    const done = today.rides.find((r) => r.id === a);
+    assert.deepEqual([done.asked, done.picked_up, done.dropped_off], [720, 725, 740], "asked, picked up and dropped off");
+    assert.ok(done.told != null, "the time given stays");
+
+    // Finished rides: today, and an earlier day; a later day or a bad day is refused.
+    let fin = (await call("/api/driver/finished")).body;
+    assert.equal(fin.day, "2026-11-11");
+    assert.deepEqual(fin.rides.map((r) => r.id).sort(), [a, b].sort());
+    assert.deepEqual(fin.days, [{ day: "2026-11-11", n: 2 }]);
+    db.prepare("UPDATE bookings SET day = '2026-11-09' WHERE id = ?").run(a);
+    fin = (await call("/api/driver/finished?day=2026-11-09")).body;
+    assert.deepEqual(fin.rides.map((r) => r.id), [a]);
+    assert.deepEqual(fin.days.map((x) => x.day), ["2026-11-11", "2026-11-09"]);
+    assert.equal((await call("/api/driver/finished?day=2026-11-12")).status, 400);
+    assert.equal((await call("/api/driver/finished?day=nope")).status, 400);
+
+    // An earlier day's ride can't be opened again; today's removed ride can: it's a new request, the old marks gone.
+    assert.deepEqual((await call(`/api/driver/bookings/${a}/reopen`, "POST", { key: "r0" })).body.errors, ["past_day"]);
+    assert.equal((await call(`/api/driver/bookings/${b}/reopen`, "POST", { key: "r1" })).status, 200);
+    const row = db.prepare("SELECT * FROM bookings WHERE id = ?").get(b);
+    assert.equal(row.status, "pending");
+    assert.equal(row.eta_minute, null);
+    assert.equal(row.asked_minute ?? row.pickup_minute, 750, "the time asked stays");
+    today = (await call("/api/driver/today")).body;
+    assert.ok(today.requests.some((r) => r.id === b), "back with the new requests");
+    assert.equal((await call(`/api/driver/bookings/${b}/reopen`, "POST", { key: "r2" })).status, 400, "an open ride can't be opened again");
+    // Taken again: the caller is told the time.
+    const before = texts(db, "accepted").length;
+    assert.equal((await call(`/api/driver/bookings/${b}/accept`, "POST", { key: "a2" })).status, 200);
+    assert.equal(texts(db, "accepted").length, before + 1);
+  });
+});

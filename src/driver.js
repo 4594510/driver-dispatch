@@ -198,6 +198,18 @@ export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
     res.json({ driver: publicDriver(d, sharingNow(db, c.settings, d, c.now)), ...todayFor(db, here), hours: hoursOf(c.settings), app: appRelease(), web: WEB_VERSION });
   });
 
+  // Finished rides of a day (default today); days: the days that have any, newest first, for the app's day buttons.
+  r.get("/finished", (req, res) => {
+    const c = ctxFor();
+    const todayDay = localParts(c.now, c.settings.timeZone).day;
+    const asked = String(req.query.day || todayDay);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asked) || asked > todayDay) return res.status(400).json({ ok: false, errors: ["bad_day"] });
+    const from = new Date(Date.parse(`${todayDay}T12:00:00Z`) - HISTORY_DAYS * 864e5).toISOString().slice(0, 10);
+    const days = db.prepare(`SELECT day, count(*) AS n FROM bookings WHERE day >= ? AND day <= ? AND status IN ('completed', 'no_show', 'cancelled', 'rejected')
+      GROUP BY day ORDER BY day DESC`).all(from, todayDay);
+    res.json({ ok: true, day: asked, today: todayDay, days, rides: finishedFor(db, asked) });
+  });
+
   // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).
   r.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), ctxFor().now)));
   r.post("/schedule", once(async (req) => addChange(db, req.body, req.actor, getSettings(db), ctxFor().now)));
@@ -380,6 +392,7 @@ export function todayFor(db, here) {
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women, together: !!b.together,
       from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
       proposed_minute: b.proposed_minute, phone: b.booked_by_phone, caller: callerOf(db, b), return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
+      told: b.told_minute,
       ...priorityFields(db, b),
     }))
     // By the time shown (the offered time for one waiting for the caller), earliest on top (driver feedback,
@@ -391,13 +404,7 @@ export function todayFor(db, here) {
   const rides = db
     .prepare("SELECT * FROM bookings WHERE day = ? AND status NOT IN ('pending', 'proposed') ORDER BY pickup_minute, created_at")
     .all(here.day)
-    .map((b) => ({
-      id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
-      from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
-      return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
-      // On board: the drop-off time counts now, not the pickup (driver feedback, 2026-11-16).
-      dropoff_eta: dropoffAt.get(b.id) ?? null, phone: b.booked_by_phone, caller: callerOf(db, b),
-    }));
+    .map((b) => rideOf(db, b, dropoffAt));
   const manual = db.prepare("SELECT manual FROM routes WHERE day = ?").get(here.day)?.manual;
   return {
     day: here.day,
@@ -407,4 +414,28 @@ export function todayFor(db, here) {
     requests,
     rides,
   };
+}
+
+// A ride for the app's lists, with every time it has (driver feedback, 2026-11-17: "what time they wanted, what time you
+// gave them and what time the GPS says"): asked, told (given), the GPS pickup time while taken, and when the driver
+// really picked up and dropped off.
+export function rideOf(db, b, dropoffAt = new Map()) {
+  return {
+    id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
+    from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
+    return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
+    // On board: the drop-off time counts now, not the pickup (driver feedback, 2026-11-16).
+    dropoff_eta: dropoffAt.get(b.id) ?? b.eta_dropoff_minute ?? null, phone: b.booked_by_phone, caller: callerOf(db, b),
+    picked_up: b.picked_up_minute ?? null, dropped_off: b.dropped_off_minute ?? null,
+  };
+}
+
+// Finished rides of a day (driver feedback, 2026-11-17: "should see all finished pickups"): done, no-show, cancelled
+// and declined, latest first, for today or an earlier day (up to HISTORY_DAYS back).
+export const HISTORY_DAYS = 60;
+export function finishedFor(db, day) {
+  return db
+    .prepare("SELECT * FROM bookings WHERE day = ? AND status IN ('completed', 'no_show', 'cancelled', 'rejected') ORDER BY coalesce(picked_up_minute, pickup_minute) DESC, created_at DESC")
+    .all(day)
+    .map((b) => rideOf(db, b));
 }

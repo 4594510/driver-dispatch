@@ -102,6 +102,11 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   list with AM/PM and a minutes list (no phone time box); a changed day has "Back to the usual hours"; an open app page
   reloads itself when the server has a newer one (/today web). Phone: * at the read-back says it again; once today's
   rides started, the hours say only "until" (W.ridesUntil).
+- Driver feedback (2026-11-17): a finished ride of today (done, cancelled, declined, no-show) has "Open again": it comes
+  back as a new request (bookings.js reopen; asked and told times kept, marks cleared), taken the usual way, so the
+  caller hears the time. Finished rides of today sit under "Finished today"; "Finished rides, all days" shows any day
+  back 60 days (/finished). Every ride shows Asked, Given (told; Offered while the caller is asked), GPS (a new request:
+  the pickup time if taken now, from the preview) and, once done, Picked up / Dropped off.
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
