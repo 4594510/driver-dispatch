@@ -106,6 +106,6 @@ details.add[open] { background: var(--bg); border-radius: 8px; padding: 4px 10px
 .fromto .ft { display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .fromto .ft.to { text-align: right; }
 .fromto .ft-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--quiet); }
-.fromto .ft span[dir] { unicode-bidi: plaintext; text-align: left; }
-.fromto .ft.to span[dir] { text-align: right; }
+.fromto .ft [dir] { unicode-bidi: plaintext; text-align: left; }
+.fromto .ft.to [dir] { text-align: right; }
 .fromto .ft-arrow { align-self: center; color: var(--quiet); }

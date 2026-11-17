@@ -464,3 +464,13 @@ test("driver feedback 2026-11-17: open a closed ride again, finished rides of an
     assert.equal(texts(db, "accepted").length, before + 1);
   });
 });
+
+test("a saved place shows its name with its address; a typed address shows only the address", async () => {
+  const { placeName } = await import("../src/driver.js");
+  const db = openDb(":memory:");
+  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('shul', NULL, '20', 'Shul', '5 Sample Rd')").run();
+  db.prepare("INSERT INTO places (id, household_id, code, name, address) VALUES ('same', NULL, '21', '7 Main St', '7 Main St')").run();
+  assert.equal(placeName(db, "shul", "5 Sample Rd"), "Shul");
+  assert.equal(placeName(db, "same", "7 Main St"), "");
+  assert.equal(placeName(db, null, "9 Typed Ave"), "");
+});

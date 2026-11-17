@@ -141,12 +141,15 @@ label.check input { width: auto; margin: 0; }
 .timepick select { flex: 1; }
 
 /* Pickup on the left, drop-off on the right (2026-11-17). */
-.fromto { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: start; direction: ltr; margin: 6px 0; }
+.fromto { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: stretch; direction: ltr; margin: 6px 0; }
 .fromto .ft { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 8px; background: var(--soft); overflow-wrap: anywhere; }
 .fromto .ft.to { text-align: right; background: var(--soft-good); }
 .fromto .ft-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
 .fromto .ft.to .ft-label { color: var(--good); }
-.fromto .ft-addr { font-size: 17px; font-weight: 600; unicode-bidi: plaintext; text-align: left; }
+.fromto .ft-name { font-size: 17px; font-weight: 700; unicode-bidi: plaintext; text-align: left; }
+.fromto .ft-addr { font-size: 16px; unicode-bidi: plaintext; text-align: left; }
+.fromto .ft.to .ft-name { text-align: right; }
 .fromto .ft.to .ft-addr { text-align: right; }
 .fromto .ft-arrow { align-self: center; font-size: 20px; color: var(--quiet); }
-.stop .fromto .ft-addr { font-size: 15px; }
+.stop .fromto .ft-addr, .stop .fromto .ft-name { font-size: 15px; }
+.addr[dir], .quiet[dir] { unicode-bidi: plaintext; }

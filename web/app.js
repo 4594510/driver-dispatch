@@ -137,7 +137,8 @@ async function home() {
 }
 
 // Pickup on the left, drop-off on the right (Shloime, 2026-11-17).
-const fromTo = (b) => `<div class="fromto"><div class="ft from"><span class="ft-label">Pickup</span><span dir="auto">${esc(b.pickup_address)}</span></div><span class="ft-arrow">→</span><div class="ft to"><span class="ft-label">Drop-off</span><span dir="auto">${esc(b.dropoff_address)}</span></div></div>`;
+const ftEnd = (cls, label, name, addr) => `<div class="ft ${cls}"><span class="ft-label">${label}</span>${name ? `<b dir="auto">${esc(name)}</b>` : ""}<span dir="auto">${esc(addr)}</span></div>`;
+const fromTo = (b) => `<div class="fromto">${ftEnd("from", "Pickup", b.pickup_name, b.pickup_address)}<span class="ft-arrow">→</span>${ftEnd("to", "Drop-off", b.dropoff_name, b.dropoff_address)}</div>`;
 
 // ---------- bookings ----------
 function bookingTable(rows, { showDay = false } = {}) {

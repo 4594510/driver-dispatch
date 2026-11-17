@@ -26,7 +26,7 @@ import { savePlace, checkCode } from "./places.js";
 import { addPlaceLists } from "./seed.js";
 import { rideAction, runningLate, ADMIN_ACTIONS } from "./actions.js";
 import { createAppRelease } from "./appupdate.js";
-import { driverRouter, setPin, driverNow, setDriverStatus, forgetIfHidden, notSharedReason } from "./driver.js";
+import { driverRouter, setPin, driverNow, setDriverStatus, forgetIfHidden, notSharedReason, placeName } from "./driver.js";
 import { backupNow, backupDue } from "./backup.js";
 import { priorityOf, listPriorities, addPriority, removePriority } from "./priority.js";
 import { addFeedback, listFeedback, updateFeedback, feedbackRouter } from "./feedback.js";
@@ -439,7 +439,8 @@ export function createApp(db = openDb(), env = process.env, deps = {}) {
       : db.prepare("SELECT * FROM bookings WHERE day = ? ORDER BY pickup_minute").all(day);
     res.json(rows.map((b) => {
       const p = priorityOf(db, b);
-      return { ...b, priority: p.level, priority_label: p.label };
+      return { ...b, priority: p.level, priority_label: p.label,
+        pickup_name: placeName(db, b.pickup_place_id, b.pickup_address), dropoff_name: placeName(db, b.dropoff_place_id, b.dropoff_address) };
     }));
   });
   admin.post("/bookings", async (req, res) => {

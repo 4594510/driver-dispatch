@@ -323,7 +323,7 @@ function stopCard(s, big) {
     <h2>${esc(s.rider_name || "Ride")}${prioBadge(s)}</h2>
     ${callerLine(s)}
     ${pickup ? timesLine(s, s.arrive) : ""}
-    <div class="addr">${esc(s.address)}</div>
+    ${placeAddr(s)}
     <div class="quiet">${people(s)}${s.together ? " · may sit together" : ""}</div>
     ${big && s.seats ? `<div class="quiet">Seats: ${esc(seatText(s.seats))}</div>` : ""}
     ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
@@ -399,8 +399,10 @@ async function fetchPreviews() {
 
 // Where from and where to, side by side: pickup on the left, drop-off on the right (Shloime, 2026-11-17: "so it's
 // easier to see"). Left stays left even for a Yiddish address (direction ltr on the pair, dir=auto on each address).
-const fromTo = (from, to) => `<div class="fromto"><div class="ft from"><span class="ft-label">Pick up</span><span class="ft-addr" dir="auto">${esc(from)}</span></div>
-  <div class="ft-arrow">→</div><div class="ft to"><span class="ft-label">Drop off</span><span class="ft-addr" dir="auto">${esc(to)}</span></div></div>`;
+const endBox = (cls, label, name, addr) => `<div class="ft ${cls}"><span class="ft-label">${label}</span>${name ? `<span class="ft-name" dir="auto">${esc(name)}</span>` : ""}<span class="ft-addr" dir="auto">${esc(addr)}</span></div>`;
+const fromTo = (r) => `<div class="fromto">${endBox("from", "Pick up", r.from_name, r.from)}<div class="ft-arrow">→</div>${endBox("to", "Drop off", r.to_name, r.to)}</div>`;
+// A stop's place: the saved place's name with its address under it (Shloime, 2026-11-17).
+const placeAddr = (s, cls = "addr") => `${s.place ? `<div class="${cls}" dir="auto"><b>${esc(s.place)}</b></div>` : ""}<div class="${cls}" dir="auto">${esc(s.address)}</div>`;
 
 // A new ride request: who, from where to where, when; "Take it" or "Can't".
 function requestCard(r) {
@@ -409,7 +411,7 @@ function requestCard(r) {
     <div>${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}</div>
     <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     ${callerLine(r)}
-    ${fromTo(r.from, r.to)}
+    ${fromTo(r)}
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
     ${timesLine(r, gpsFor(r))}
     ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
@@ -449,7 +451,7 @@ function routePane() {
 function stopRow(s) {
   return `<div class="stop"><div class="time">${minuteText(s.arrive)}</div>
     <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-      <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}<div class="quiet">${esc(s.address)}</div>
+      <b>${esc(s.rider_name || "Ride")}</b>${prioBadge(s)} · ${people(s)}${placeAddr(s, "quiet")}
       ${callerLine(s)}${s.kind === "pickup" ? timesLine(s, s.arrive) : ""}
       <div class="row-actions">${s.kind === "pickup" ? `<button class="ghost small" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
         : `<button class="ghost small" data-act="done" data-id="${s.booking_id}">Dropped off</button>`}</div></div></div>`;
@@ -458,7 +460,7 @@ function orderEditor() {
   const stops = reorder;
   return `<div class="card list">${stops.map((s, i) => `<div class="stop">
       <div class="body"><div class="kind ${s.kind}">${s.kind === "pickup" ? "Pick up" : "Drop off"}</div>
-        <b>${esc(s.rider_name)}</b> · ${people(s)}<div class="quiet">${esc(s.address)}</div></div>
+        <b>${esc(s.rider_name)}</b> · ${people(s)}${placeAddr(s, "quiet")}</div>
       <div class="move"><button class="ghost" data-up="${i}" ${i === 0 ? "disabled" : ""}>▲</button><button class="ghost" data-down="${i}" ${i === stops.length - 1 ? "disabled" : ""}>▼</button></div>
     </div>`).join("")}</div>
     <div class="actions"><button class="ghost" data-reorder-cancel>Cancel</button><button class="good" data-reorder-save>Save this order</button></div>`;
@@ -503,7 +505,7 @@ function rideRow(r, reopen = true) {
     : finished && reopen ? `<div class="row-actions"><button class="ghost small" data-act="reopen" data-id="${r.id}">Open again</button></div>` : "";
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(time)}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
-      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div>${fromTo(r.from, r.to)}
+      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div>${fromTo(r)}
       ${callerLine(r)}
       ${timesLine(r, r.status === "accepted" ? r.eta : null)}
       ${onBoard ? `<div class="times">Drop off${r.dropoff_eta != null ? ` about <b>${minuteText(r.dropoff_eta)}</b>` : ""}</div>` : ""}

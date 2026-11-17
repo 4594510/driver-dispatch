@@ -382,7 +382,8 @@ export function todayFor(db, here) {
     const { b, ...e } = extra(s.booking_id);
     const lat = s.kind === "pickup" ? b?.pickup_lat : b?.dropoff_lat;
     const lng = s.kind === "pickup" ? b?.pickup_lng : b?.dropoff_lng;
-    return { ...s, ...e, lat, lng, index: i, seatsHere: route.seatsByStop.find((x) => x.stop === i)?.rows || null };
+    const place = s.kind === "pickup" ? placeName(db, b?.pickup_place_id, b?.pickup_address) : placeName(db, b?.dropoff_place_id, b?.dropoff_address);
+    return { ...s, ...e, lat, lng, place, index: i, seatsHere: route.seatsByStop.find((x) => x.stop === i)?.rows || null };
   });
   const next = stops.find((s) => (s.kind === "pickup" && s.status === "accepted") || (s.kind === "dropoff" && s.status === "picked_up")) || null;
   const requests = db
@@ -390,7 +391,8 @@ export function todayFor(db, here) {
     .all(here.day)
     .map((b) => ({
       id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women, together: !!b.together,
-      from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
+      from: b.pickup_address, to: b.dropoff_address, from_name: placeName(db, b.pickup_place_id, b.pickup_address),
+      to_name: placeName(db, b.dropoff_place_id, b.dropoff_address), window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
       proposed_minute: b.proposed_minute, phone: b.booked_by_phone, caller: callerOf(db, b), return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute,
       told: b.told_minute,
       ...priorityFields(db, b),
@@ -416,13 +418,22 @@ export function todayFor(db, here) {
   };
 }
 
+// The saved place's name for one end of a ride, when it has one that says more than the address (Shloime,
+// 2026-11-17: "always show the address along with the name").
+export function placeName(db, placeId, address) {
+  if (!placeId) return "";
+  const n = db.prepare("SELECT name FROM places WHERE id = ?").get(placeId)?.name || "";
+  return n && n.trim() !== String(address || "").trim() ? n : "";
+}
+
 // A ride for the app's lists, with every time it has (driver feedback, 2026-11-17: "what time they wanted, what time you
 // gave them and what time the GPS says"): asked, told (given), the GPS pickup time while taken, and when the driver
 // really picked up and dropped off.
 export function rideOf(db, b, dropoffAt = new Map()) {
   return {
     id: b.id, status: b.status, rider_name: b.rider_name, men: b.men, women: b.women,
-    from: b.pickup_address, to: b.dropoff_address, window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
+    from: b.pickup_address, to: b.dropoff_address, from_name: placeName(db, b.pickup_place_id, b.pickup_address),
+      to_name: placeName(db, b.dropoff_place_id, b.dropoff_address), window: [b.pickup_minute, b.pickup_minute + b.window_minutes],
     return_of: b.return_of, asked: b.asked_minute ?? b.pickup_minute, told: b.told_minute, eta: b.eta_minute,
     // On board: the drop-off time counts now, not the pickup (driver feedback, 2026-11-16).
     dropoff_eta: dropoffAt.get(b.id) ?? b.eta_dropoff_minute ?? null, phone: b.booked_by_phone, caller: callerOf(db, b),
