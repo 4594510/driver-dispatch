@@ -122,7 +122,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   "say the place back" (settings.phoneSayPlace: פון/קיין + the name, as before 2026-11-16). Offering another time is a
   free time field (web/driver/timetext.js parseTimeText: 2:35, 235, 14:30, 2:35 pm; 1-6 without AM/PM is afternoon).
   The dashboard's Schedule is a calendar, week or month (/api/admin/schedule/days); tap a day, a later day for a range.
-  Announcements show the weekday, date and time they were added.
+  Announcements show the weekday, date and time they were added; on the phone (menu 5) each says its day and time
+  ("פון מאנטאג אום דריי נאכמיטאג").
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).
