@@ -390,6 +390,10 @@ test("menu key 5 plays the messages sent out to everyone or the caller's family,
   assert.ok(text.includes("No rides Friday"), "a text message is read out");
   assert.ok(!text.includes("Other family") && !text.includes("Old news"));
   assert.ok(text.includes("נעכטן") && text.includes("מאנטאג"), "each says which day it was sent");
+  // And the time it was added: Monday 11 AM New York, yesterday 12 noon.
+  const joined = text.join(" ");
+  assert.ok(joined.includes("מאנטאג אום עלף אינדערפרי"), joined);
+  assert.ok(joined.includes("נעכטן אום צוועלף נאכמיטאג"), joined);
   assert.ok(r[1].play.findIndex((p) => p.audio) < r[1].play.findIndex((p) => p.say === "No rides Friday"), "newest first");
   assert.ok(r[1].gather, "back to the menu");
 });

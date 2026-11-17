@@ -176,14 +176,15 @@ function scheduleSpeech(c) {
 
 // ---------- messages sent out ----------
 // Menu key 5: the messages from the last two weeks to everyone or to this family, newest first: "message number 1, from
-// Monday:", then the admin's recording, or the text in Fonory's Yiddish voice.
+// Monday at 3 in the afternoon:" (the day and time it was added; Shloime, 2026-11-17), then the admin's recording, or
+// the text in Fonory's Yiddish voice.
 function messagesSpeech(c) {
   const list = recentAnnouncements(c.db, c.phone.household_id, c.now);
   if (!list.length) return [P("P54")];
   const day = today(c).day;
   return list.map((a, i) => [
     P("P55"), numberOf(c, i + 1), c.say(W.from),
-    dayPieces(localParts(new Date(a.created_at), c.settings.timeZone).day, day).map((t) => c.say(t)),
+    ((at) => [dayPieces(at.day, day).map((t) => c.say(t)), c.say(W.at), timeOf(c, at.minute)])(localParts(new Date(a.created_at), c.settings.timeZone)),
     a.recording ? { audio: `${c.base}/audio/${a.recording}` } : { say: a.text },
   ]);
 }

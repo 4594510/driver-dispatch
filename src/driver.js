@@ -13,7 +13,7 @@ import { previewAccept, refreshDay, dayRoute, reorderRoute, autoRoute, bookRide 
 import { rideAction, runningLate, tellLate, DRIVER_ACTIONS } from "./actions.js";
 import { localParts } from "./rules.js";
 import { getSettings } from "./settings.js";
-import { scheduleView, addChange, removeChange, dayHours, addBreak, removeBreak } from "./schedule.js";
+import { scheduleView, addChange, removeChange, dayHours, addBreak, removeBreak, calendarDays } from "./schedule.js";
 import { priorityOf } from "./priority.js";
 import { addStop, removeStop, stopDone, stopsView, stopsFor } from "./stops.js";
 
@@ -213,6 +213,11 @@ export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
 
   // The schedule: the driver sets other hours, or no rides, for a day or a range of days (callers hear it).
   r.get("/schedule", (_req, res) => res.json(scheduleView(db, getSettings(db), ctxFor().now)));
+  // The calendar, a week or a month (Shloime, 2026-11-17: the driver uses only the app).
+  r.get("/schedule/days", (req, res) => {
+    const v = calendarDays(db, getSettings(db), ctxFor().now, String(req.query.from || ""), String(req.query.to || ""));
+    res.status(v.ok ? 200 : 400).json(v);
+  });
   r.post("/schedule", once(async (req) => addChange(db, req.body, req.actor, getSettings(db), ctxFor().now)));
   r.post("/schedule/:id/remove", once(async (req) => removeChange(db, req.params.id, req.actor)));
   // Breaks planned ahead, several a day (Shloime, 2026-11-16).
@@ -296,6 +301,44 @@ export function driverRouter(db, ctxFor, appRelease = () => null, extra = {}) {
     const where = b.placeId ? { placeId: String(b.placeId) } : { address: String(b.address || "") };
     const out = await addStop(db, c.travel, req.params.id, where, req.actor, extra.checkAddress);
     return afterStop(out.ok ? { ok: true, stop: { id: out.stop.id, address: out.stop.address }, routed: out.routed, day: out.day } : out);
+  }));
+  // Change a ride's pickup or drop-off (Shloime, 2026-11-17: the driver uses only the app, so what the office can do on
+  // a ride, the app can too): a saved place or an address. A ride already taken is re-timed at once.
+  r.post("/bookings/:id/address", once(async (req) => {
+    const c = ctxFor();
+    const b = getBooking(db, req.params.id);
+    const body = req.body || {};
+    const end = body.end === "dropoff" ? "dropoff" : "pickup";
+    if (!b) return { ok: false, errors: ["not_found"] };
+    const open = end === "pickup" ? ["pending", "proposed", "accepted"] : ["pending", "proposed", "accepted", "picked_up"];
+    if (!open.includes(b.status)) return { ok: false, errors: ["wrong_status"] };
+    let placeId = null;
+    let address = "";
+    let point = null;
+    if (body.placeId) {
+      const p = db.prepare("SELECT * FROM places WHERE id = ? AND active = 1").get(String(body.placeId));
+      if (!p) return { ok: false, errors: ["no_place"] };
+      placeId = p.id;
+      address = p.address;
+      point = p.lat != null ? { lat: p.lat, lng: p.lng } : await c.travel.geocode(p.address);
+    } else {
+      address = String(body.address || "").trim().slice(0, 200);
+      if (!address) return { ok: false, errors: ["no_place"] };
+      if (extra.checkAddress) {
+        const check = await extra.checkAddress(address);
+        if (check?.error) return { ok: false, error: check.error };
+        point = check?.point || null;
+      }
+      point ||= await c.travel.geocode(address);
+    }
+    if (!point) return { ok: false, errors: ["not_on_map"] };
+    const other = end === "pickup" ? b.dropoff_address : b.pickup_address;
+    if (address === other && (placeId || null) === (end === "pickup" ? b.dropoff_place_id : b.pickup_place_id)) return { ok: false, errors: ["same_place"] };
+    db.prepare(`UPDATE bookings SET ${end}_address = ?, ${end}_place_id = ?, ${end}_lat = ?, ${end}_lng = ?, updated_at = ? WHERE id = ?`)
+      .run(address, placeId, point.lat, point.lng, nowIso(), b.id);
+    audit(db, req.actor, "booking_changed", b.id, { [`${end}_address`]: address });
+    if (["accepted", "picked_up"].includes(b.status)) await refreshDay(db, c.travel, b.day, c.settings, c.now);
+    return { ok: true, address };
   }));
   r.post("/stops/:id/remove", once(async (req) => afterStop(removeStop(db, req.params.id, req.actor))));
   r.post("/stops/:id/done", once(async (req) => afterStop(stopDone(db, req.params.id, req.actor))));

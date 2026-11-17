@@ -27,7 +27,7 @@ const ERRORS = {
   not_pending: "This ride isn't waiting for an answer any more.", no_time: "The route can't fit this ride without making others late.",
   no_seats: "The seats don't work for this.", wrong_status: "Not possible now (the ride changed).", bad_time: "Choose a time within service hours.",
   dropoff_before_pickup: "A drop-off can't come before its pickup.", route_changed: "The route changed meanwhile. Look again.",
-  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", past_time: "That time already passed. Choose a later one.", past_day: "Only today's rides can be opened again.",
+  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", same_place: "Pick up and drop off can't be the same place.", past_time: "That time already passed. Choose a later one.", past_day: "Only today's rides can be opened again.",
   not_registered: "Choose who the ride is for.", no_riders: "Choose how many men and women (or a package).", no_pickup: "Choose where from.",
   no_dropoff: "Choose where to.", outside_hours: "That time is outside today's hours.", closed: "There are no rides today.",
   in_past: "That time already passed.", driver_break: "That time is inside one of your breaks.", too_far: "That trip is longer than 30 minutes.",
@@ -418,7 +418,7 @@ function stopsLine(r) {
   const list = (r.stops || []).map((x) => `<div class="via ${x.done ? "done" : ""}"><span class="via-n">${x.done ? "✓" : x.n}</span>
     <span class="via-text" dir="auto">${x.place ? `<b>${esc(x.place)}</b> · ` : ""}${esc(x.address)}</span>
     ${open && !x.done ? `<button class="link" data-stop-remove="${x.id}">Remove</button>` : ""}</div>`).join("");
-  return `${list ? `<div class="vias"><div class="ft-label">Stops on the way</div>${list}</div>` : ""}${open ? `<div class="add-stop"><button class="ghost small" data-stop-add="${r.id}">+ Add a stop</button></div>` : ""}`;
+  return `${list ? `<div class="vias"><div class="ft-label">Stops on the way</div>${list}</div>` : ""}${open ? `<div class="add-stop"><button class="ghost small" data-stop-add="${r.id}">+ Add a stop</button><button class="ghost small" data-addr-change="${r.id}">Change address</button></div>` : ""}`;
 }
 // The stops of a ride from today's lists (for the route's own rows).
 const rideStops = (id) => [...(today?.requests || []), ...(today?.rides || [])].find((r) => r.id === id)?.stops;
@@ -614,26 +614,67 @@ function readPick(form, name) {
 async function loadSchedule() {
   try {
     const r = await api("/api/driver/schedule");
-    if (r.ok) sched = r.data;
+    if (r.ok) { sched = r.data; cal.failed = ""; cal.days = null; cal.key = ""; }
   } catch { /* no signal */ }
   if (tab === "hours") render();
 }
-// The hours as a calendar, one week at a time (driver feedback, 2026-11-16): tap a day to change it or add a break.
-let week = 0;
+// The hours as a calendar, a week or a month at a time, with arrows (driver feedback, 2026-11-16; Shloime, 2026-11-17:
+// "a calendar, week view etc."): tap a day to change it or add a break.
+const isoDay = (d) => d.toISOString().slice(0, 10);
+const shiftDay = (day, n) => { const d = new Date(`${day}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return isoDay(d); };
+const weekStart = (day) => shiftDay(day, -new Date(`${day}T12:00:00Z`).getUTCDay());
+const cal = { view: "week", at: null, days: null, key: "", failed: "" };
+function calRange() {
+  if (cal.view === "week") { const a = weekStart(cal.at); return [a, shiftDay(a, 6)]; }
+  const a = weekStart(`${cal.at.slice(0, 7)}-01`);
+  return [a, shiftDay(a, 41)];
+}
+async function loadCalendar(force = false) {
+  const [a, b] = calRange();
+  const key = `${a}/${b}`;
+  if (cal.key === key && (cal.days || cal.loading)) return;
+  if (cal.failed === key && !force) return; // no signal: not again on every redraw, only when asked
+  cal.key = key;
+  cal.days = null;
+  cal.loading = true;
+  try { const r = await api(`/api/driver/schedule/days?from=${a}&to=${b}`); if (r.ok && cal.key === key) cal.days = r.data.days; } catch { /* no signal */ }
+  cal.loading = false;
+  cal.failed = cal.days ? "" : key;
+  if (tab === "hours") render();
+}
+function calTitle() {
+  const [a, b] = calRange();
+  if (cal.view === "month") return new Date(`${cal.at.slice(0, 7)}-15T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  const short = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${short(a)} – ${short(b)}`;
+}
+function calendarHtml(first) {
+  if (!cal.days) { loadCalendar(); return '<p class="quiet">Loading… (the calendar needs signal)</p>'; }
+  const breaksOn = (day) => (sched.breaks || []).filter((b) => b.day === day);
+  if (cal.view === "week") {
+    return `<div class="week">${cal.days.map((d) => {
+      const brk = breaksOn(d.day);
+      return `<button class="day ${d.closed ? "closed" : d.changed ? "changed" : ""} ${d.past ? "past" : ""}" ${d.past ? "disabled" : `data-day="${esc(d.day)}"`}>
+        <span class="dname">${esc(dayText(d.day))}${d.day === first ? " · today" : ""}</span>
+        <span class="dhours">${esc(hoursText(d))}</span>
+        ${brk.length ? `<span class="dbreak">${brk.map((x) => `Break ${esc(minuteText(x.startMinute))} – ${esc(minuteText(x.endMinute))}`).join("<br>")}</span>` : ""}</button>`;
+    }).join("")}</div>`;
+  }
+  const month = cal.at.slice(0, 7);
+  return `<div class="month">${WD.map((n) => `<div class="wd">${n === "Shabbos" ? "Shab" : n}</div>`).join("")}${cal.days.map((d) => {
+    const cls = ["mday", d.closed ? "closed" : d.changed ? "changed" : "", d.past ? "past" : "", d.day === first ? "today" : "", d.day.slice(0, 7) !== month ? "other" : ""].join(" ");
+    const short = d.closed ? "No rides" : d.changed ? `${minuteText(d.openMinute).replace(":00", "")}–${minuteText(d.closeMinute).replace(":00", "")}` : "";
+    return `<button class="${cls}" ${d.past ? "disabled" : `data-day="${esc(d.day)}"`}><b>${Number(d.day.slice(8))}</b>${short ? `<span>${esc(short)}</span>` : ""}${breaksOn(d.day).length ? '<span class="dbreak">Break</span>' : ""}</button>`;
+  }).join("")}</div>`;
+}
 function hoursView() {
   if (!sched) return '<div class="card"><p class="quiet">Loading… (the hours need signal)</p></div>';
   const first = sched.days[0].day;
-  const days = sched.days.slice(week * 7, week * 7 + 7);
-  const breaksOn = (day) => (sched.breaks || []).filter((b) => b.day === day);
-  return `<div class="card"><div class="actions"><button class="${week === 0 ? "on" : "ghost"}" data-week="0">This week</button><button class="${week === 1 ? "on" : "ghost"}" data-week="1">Next week</button></div>
+  cal.at = cal.at || first;
+  return `<div class="card"><div class="actions"><button class="${cal.view === "week" ? "on" : "ghost"}" data-cal-view="week">Week</button><button class="${cal.view === "month" ? "on" : "ghost"}" data-cal-view="month">Month</button></div>
+      <div class="calnav"><button class="ghost" data-cal-move="-1">‹</button><b>${esc(calTitle())}</b><button class="ghost" data-cal-move="1">›</button><button class="ghost" data-cal-today>Today</button></div>
       <p class="quiet">Usually ${minuteText(sched.usual.openMinute)} – ${minuteText(sched.usual.closeMinute)}. Tap a day to change it. Callers hear the changes on the phone.</p>
-      <div class="week">${days.map((d) => {
-        const brk = breaksOn(d.day);
-        return `<button class="day ${d.closed ? "closed" : d.changed ? "changed" : ""}" data-day="${esc(d.day)}">
-          <span class="dname">${esc(dayText(d.day))}${d.day === first ? " · today" : ""}</span>
-          <span class="dhours">${esc(hoursText(d))}</span>
-          ${brk.length ? `<span class="dbreak">${brk.map((b) => `Break ${esc(minuteText(b.startMinute))} – ${esc(minuteText(b.endMinute))}`).join("<br>")}</span>` : ""}</button>`;
-      }).join("")}</div>
+      ${calendarHtml(first)}
       <button class="big" data-sch-add>Change several days…</button></div>
     ${sched.changes.length ? `<div class="card"><h2>Changes</h2>${sched.changes.map((c) => `<div class="stop"><div class="body">
       ${esc(c.from === c.to ? dayText(c.from) : `${dayText(c.from)} to ${dayText(c.to)}`)}${c.weekdays ? ` <span class="quiet">(${c.weekdays.map((d) => WD[d]).join(", ")})</span>` : ""}
@@ -649,7 +690,7 @@ function hoursView() {
 }
 // One day of the calendar: its hours and breaks, and what can be changed.
 function daySheet(day) {
-  const d = sched.days.find((x) => x.day === day);
+  const d = sched.days.find((x) => x.day === day) || cal.days?.find((x) => x.day === day);
   if (!d) return;
   const brk = (sched.breaks || []).filter((b) => b.day === day);
   sheet(`<h2>${esc(dayText(day))}</h2><p><b>${esc(hoursText(d))}</b>${d.changed ? ' <span class="quiet">(changed)</span>' : ""}</p>
@@ -870,6 +911,29 @@ async function saveStop(id) {
   if (r?.ok) closeSheet();
 }
 
+// Change a ride's pickup or drop-off: a saved place or an address (Shloime, 2026-11-17: the driver uses only the app).
+async function addressSheet(id) {
+  sheet('<p class="quiet">Loading…</p>');
+  try { const r = await api("/api/driver/book-options"); if (r.ok) bookOptions = r.data; } catch { /* no signal */ }
+  if (!bookOptions) { info("No signal. Changing an address needs signal."); return; }
+  const ride = [...(today?.requests || []), ...(today?.rides || [])].find((x) => x.id === id);
+  const onBoard = ride?.status === "picked_up";
+  sheet(`<h2>Change address</h2>${ride ? `<p class="quiet">${esc(ride.rider_name || "Ride")} · ${esc(ride.from_name || ride.from)} → ${esc(ride.to_name || ride.to)}</p>` : ""}
+    <form id="addr-form" onsubmit="return false">
+    <label>Which <select name="end">${onBoard ? "" : '<option value="pickup">Pick up</option>'}<option value="dropoff">Drop off</option></select></label>
+    <label>Place <select name="place"><option value="">Type an address below</option>${bookOptions.places.map((p) => `<option value="${esc(p.id)}">${esc(p.code)} · ${esc(p.name)}</option>`).join("")}</select></label>
+    <input name="address" maxlength="200" placeholder="Or an address, e.g. 12 Main St, Monsey">
+    <div class="actions"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="good" data-addr-save="${esc(id)}">Save</button></div></form>
+    <p class="quiet">The caller is not called about it. A ride you took gets its times worked out again.</p>`);
+}
+async function saveAddress(id) {
+  const f = new FormData($("#addr-form"));
+  const body = { end: f.get("end"), ...(f.get("place") ? { placeId: f.get("place") } : { address: String(f.get("address") || "").trim() }) };
+  if (!body.placeId && !body.address) { toast("Choose a place or type an address."); return; }
+  const r = await act(`/api/driver/bookings/${id}/address`, body, { queueable: false, ok: "Address changed" });
+  if (r?.ok) closeSheet();
+}
+
 // The driver adds a saved place with its code (driver feedback, 2026-11-16). Everyone can use it on the phone.
 function addPlaceSheet() {
   sheet(`<h2>Add a place</h2><form id="place-form" onsubmit="return false">
@@ -948,13 +1012,22 @@ document.addEventListener("click", async (e) => {
   if (!t) return;
   const ds = t.dataset;
   if (ds.ask) { const f = askDone; askDone = null; $("#sheet").hidden = true; f?.(["plain", "hour"].includes(ds.ask) ? ds.ask : ds.ask === "yes"); return; }
-  if (ds.week != null) { week = Number(ds.week); render(); return; }
+  if (ds.calView) { cal.view = ds.calView; cal.days = null; render(); loadCalendar(true); return; }
+  if (ds.calMove) {
+    const n = Number(ds.calMove);
+    if (cal.view === "week") cal.at = shiftDay(cal.at, 7 * n);
+    else { const d = new Date(`${cal.at.slice(0, 7)}-15T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); cal.at = isoDay(d); }
+    cal.days = null; render(); loadCalendar(true); return;
+  }
+  if (ds.calToday != null) { cal.at = sched?.days[0].day || cal.at; cal.days = null; render(); loadCalendar(true); return; }
   if (ds.day) return daySheet(ds.day);
   if (ds.dayHours || ds.dayClosed) { schKind = ds.dayHours ? "hours" : "closed"; const d = ds.dayHours || ds.dayClosed; scheduleSheet({ from: d, to: d }); return; }
   if (ds.dayUsual) return usualDay(ds.dayUsual);
   if (ds.addRide != null) return addRideSheet();
   if (ds.stopAdd) return addStopSheet(ds.stopAdd);
   if (ds.stopSave) return saveStop(ds.stopSave);
+  if (ds.addrChange) return addressSheet(ds.addrChange);
+  if (ds.addrSave) return saveAddress(ds.addrSave);
   if (ds.stopRemove) {
     if (!(await ask("Remove this stop?", "Remove", true))) return;
     await act(`/api/driver/stops/${ds.stopRemove}/remove`, {}, { queueable: false, ok: "Stop removed" });
