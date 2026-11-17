@@ -107,6 +107,8 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   caller hears the time. Finished rides of today sit under "Finished today"; "Finished rides, all days" shows any day
   back 60 days (/finished). Every ride shows Asked, Given (told; Offered while the caller is asked), GPS (a new request:
   the pickup time if taken now, from the preview) and, once done, Picked up / Dropped off.
+- Every ride shows where from and where to side by side, pickup on the left, drop-off on the right (Shloime, 2026-11-17),
+  in the driver app and the dashboard's ride tables; left stays left for a Yiddish address (fromTo in driver.js, app.js).
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).

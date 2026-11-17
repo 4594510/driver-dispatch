@@ -131,10 +131,13 @@ async function home() {
     <div class="card"><h2>Driver</h2>${drivers.map((d) => `<p>${driverLine(d)}</p>`).join("") || '<p class="quiet">No driver yet (Settings).</p>'}</div>
     <div class="card"><h2>Next rides</h2>${next.length ? `<div class="wrap"><table><tbody>${next.map((b) => `<tr>
       <td>${minuteText(b.pickup_minute)}</td><td>${esc(b.rider_name || b.booked_by_phone)}${prioBadge(b)}<div class="quiet">${esc(riders(b))}</div></td>
-      <td>${esc(b.pickup_address)} → ${esc(b.dropoff_address)}</td><td><span class="status ${esc(b.status)}">${esc(STATUS[b.status] || b.status)}</span></td></tr>`).join("")}</tbody></table></div>
+      <td>${fromTo(b)}</td><td><span class="status ${esc(b.status)}">${esc(STATUS[b.status] || b.status)}</span></td></tr>`).join("")}</tbody></table></div>
       <p><button class="ghost" data-go="today">All of today</button></p>` : '<p class="quiet">No rides waiting.</p>'}</div>`;
   main.addEventListener("click", (e) => { const t = e.target.closest("[data-go]"); if (t) open(t.dataset.go); });
 }
+
+// Pickup on the left, drop-off on the right (Shloime, 2026-11-17).
+const fromTo = (b) => `<div class="fromto"><div class="ft from"><span class="ft-label">Pickup</span><span dir="auto">${esc(b.pickup_address)}</span></div><span class="ft-arrow">→</span><div class="ft to"><span class="ft-label">Drop-off</span><span dir="auto">${esc(b.dropoff_address)}</span></div></div>`;
 
 // ---------- bookings ----------
 function bookingTable(rows, { showDay = false } = {}) {
@@ -144,7 +147,7 @@ function bookingTable(rows, { showDay = false } = {}) {
       ${showDay ? `<td>${esc(b.day)}</td>` : ""}
       <td>${minuteText(b.pickup_minute)}<div class="quiet">${b.window_minutes}-min window${b.proposed_minute != null ? `<br>offered ${minuteText(b.proposed_minute)}` : ""}</div></td>
       <td>${esc(b.rider_name || "")}${prioBadge(b)}<div class="quiet">${esc(riders(b))}<br>${esc(b.booked_by_phone)}</div></td>
-      <td>${esc(b.pickup_address)}<br>→ ${esc(b.dropoff_address)}${b.return_of ? '<div class="quiet">return trip</div>' : ""}</td>
+      <td>${fromTo(b)}${b.return_of ? '<div class="quiet">return trip</div>' : ""}</td>
       <td><span class="status ${esc(b.status)}">${esc(STATUS[b.status] || b.status)}</span></td>
       <td class="actions">${bookingButtons(b)}</td>
     </tr>`).join("")}</tbody></table></div>`;

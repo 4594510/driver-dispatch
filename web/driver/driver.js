@@ -397,6 +397,11 @@ async function fetchPreviews() {
   if (changed && tab === "next" && $("#sheet").hidden && !reorder) render();
 }
 
+// Where from and where to, side by side: pickup on the left, drop-off on the right (Shloime, 2026-11-17: "so it's
+// easier to see"). Left stays left even for a Yiddish address (direction ltr on the pair, dir=auto on each address).
+const fromTo = (from, to) => `<div class="fromto"><div class="ft from"><span class="ft-label">Pick up</span><span class="ft-addr" dir="auto">${esc(from)}</span></div>
+  <div class="ft-arrow">→</div><div class="ft to"><span class="ft-label">Drop off</span><span class="ft-addr" dir="auto">${esc(to)}</span></div></div>`;
+
 // A new ride request: who, from where to where, when; "Take it" or "Can't".
 function requestCard(r) {
   const proposed = r.status === "proposed";
@@ -404,7 +409,7 @@ function requestCard(r) {
     <div>${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}</div>
     <h2>${esc(r.rider_name || "Ride")}${prioBadge(r)}</h2>
     ${callerLine(r)}
-    <div class="addr">${esc(r.from)} → ${esc(r.to)}</div>
+    ${fromTo(r.from, r.to)}
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
     ${timesLine(r, gpsFor(r))}
     ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
@@ -498,7 +503,7 @@ function rideRow(r, reopen = true) {
     : finished && reopen ? `<div class="row-actions"><button class="ghost small" data-act="reopen" data-id="${r.id}">Open again</button></div>` : "";
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(time)}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
-      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div><div class="quiet">${esc(r.from)} → ${esc(r.to)}</div>
+      <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div>${fromTo(r.from, r.to)}
       ${callerLine(r)}
       ${timesLine(r, r.status === "accepted" ? r.eta : null)}
       ${onBoard ? `<div class="times">Drop off${r.dropoff_eta != null ? ` about <b>${minuteText(r.dropoff_eta)}</b>` : ""}</div>` : ""}
