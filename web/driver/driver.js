@@ -27,7 +27,7 @@ const ERRORS = {
   not_pending: "This ride isn't waiting for an answer any more.", no_time: "The route can't fit this ride without making others late.",
   no_seats: "The seats don't work for this.", wrong_status: "Not possible now (the ride changed).", bad_time: "Choose a time within service hours.",
   dropoff_before_pickup: "A drop-off can't come before its pickup.", route_changed: "The route changed meanwhile. Look again.",
-  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", past_time: "That time already passed. Choose a later one.",
+  bad_minutes: "Choose how many minutes.", not_found: "That ride is gone.", past_time: "That time already passed. Choose a later one.", past_day: "Only today's rides can be opened again.",
   not_registered: "Choose who the ride is for.", no_riders: "Choose how many men and women (or a package).", no_pickup: "Choose where from.",
   no_dropoff: "Choose where to.", outside_hours: "That time is outside today's hours.", closed: "There are no rides today.",
   in_past: "That time already passed.", driver_break: "That time is inside one of your breaks.", too_far: "That trip is longer than 30 minutes.",
@@ -189,6 +189,7 @@ async function load() {
   }
   showOffline();
   render();
+  fetchPreviews();
 }
 
 function alertNewRequests() {
@@ -280,7 +281,7 @@ function render() {
   $("#req-count").textContent = n;
   $("#req-count").hidden = !n;
   const main = $("#main");
-  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === (tab === "hours" ? "more" : tab));
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === (tab === "hours" ? "more" : tab === "finished" ? "next" : tab));
   const scrolls = [...main.querySelectorAll(".pane")].map((p) => p.scrollTop);
   main.classList.toggle("split", tab === "next");
   if (tab === "next") {
@@ -288,6 +289,7 @@ function render() {
     if (!jumpToRequests) main.querySelectorAll(".pane").forEach((p, i) => (p.scrollTop = scrolls[i] || 0));
     jumpToRequests = false;
   } else if (tab === "hours") main.innerHTML = `<button class="ghost" data-tab-go="more">← Back</button>${hoursView()}`;
+  else if (tab === "finished") main.innerHTML = `<button class="ghost" data-tab-go="next">← Back</button>${finishedView()}`;
   else main.innerHTML = updateView() + moreView();
 }
 
@@ -339,20 +341,60 @@ function stopCard(s, big) {
 // Who called for the ride: the phone's person or family and the number (driver feedback, 2026-11-16).
 const callerLine = (x) => (x.caller ? `<div class="caller">Called: ${esc(x.caller)}</div>` : "");
 
-// Asked, accepted (the pickup time the caller was told), the ETA, and on time or late (driver feedback, 2026-11-16).
-// Late is counted from the accepted time (or the end of the asked window when nothing was told yet).
-function timesLine(x, eta) {
+// Every ride shows its times (driver feedback, 2026-11-16 and 2026-11-17: "what time they wanted, what time you gave
+// them and what time the GPS says"): Asked, Given (the time the caller was last told; Offered while they're asked),
+// the GPS pickup time with On time or N min late (against Given, else the end of the asked window), and once done,
+// when the driver really picked up and dropped off.
+function timesLine(x, gps) {
   const parts = [];
   if (x.asked != null) parts.push(`Asked <b>${minuteText(x.asked)}</b>`);
-  if (x.told != null) parts.push(`Accepted <b>${minuteText(x.told)}</b>`);
-  if (eta != null) parts.push(`ETA <b>${minuteText(eta)}</b>`);
-  const promised = x.told ?? x.window?.[1];
+  const offered = x.status === "proposed" && x.proposed_minute != null;
+  const given = offered ? x.proposed_minute : x.told;
+  parts.push(given != null ? `${offered ? "Offered" : "Given"} <b>${minuteText(given)}</b>` : "Given <b>not yet</b>");
   let state = "";
-  if (eta != null && promised != null) {
-    const late = Math.round(eta - promised);
-    state = late > 0 ? ` <span class="tag no">${late} min late</span>` : ' <span class="tag taken">On time</span>';
+  if (x.picked_up != null) parts.push(`Picked up <b>${minuteText(x.picked_up)}</b>`);
+  else if (gps?.error) parts.push(`GPS <b>doesn't fit now</b>`);
+  else if (gps === "loading") parts.push("GPS <b>…</b>");
+  else if (gps != null && typeof gps === "number") {
+    parts.push(`GPS <b>${minuteText(gps)}</b>`);
+    const promised = given ?? x.window?.[1];
+    if (promised != null) {
+      const late = Math.round(gps - promised);
+      state = late > 0 ? ` <span class="tag no">${late} min late</span>` : ' <span class="tag taken">On time</span>';
+    }
   }
-  return parts.length ? `<div class="times">${parts.join(" · ")}${state}</div>` : "";
+  if (x.dropped_off != null) parts.push(`Dropped off <b>${minuteText(x.dropped_off)}</b>`);
+  return `<div class="times">${parts.join(" · ")}${state}</div>`;
+}
+
+// The GPS pickup time for a new request, if the driver took it now (the same check as "Take it"), fetched in the
+// background and kept until the route or the time moves on.
+const previews = {};
+function gpsFor(r) {
+  if (r.status !== "pending") return null;
+  const p = previews[r.id];
+  if (!p) return "loading";
+  return p.error ? { error: true } : p.eta;
+}
+async function fetchPreviews() {
+  if (!today || !navigator.onLine) return;
+  const stamp = `${today.route?.updatedAt || ""}|${Math.floor((today.minute || 0) / 5)}`;
+  let changed = false;
+  for (const r of (today.requests || []).filter((x) => x.status === "pending")) {
+    const p = previews[r.id];
+    if (p && (p.stamp === stamp || p.busy)) continue;
+    previews[r.id] = { ...(p || {}), busy: true };
+    try {
+      const res = await api(`/api/driver/requests/${r.id}/preview`);
+      previews[r.id] = res.ok && res.data?.eta != null ? { stamp, eta: res.data.eta } : { stamp, error: true };
+    } catch {
+      previews[r.id] = p ? { ...p, busy: false } : undefined;
+      if (!previews[r.id]) delete previews[r.id];
+      continue;
+    }
+    changed = true;
+  }
+  if (changed && tab === "next" && $("#sheet").hidden && !reorder) render();
 }
 
 // A new ride request: who, from where to where, when; "Take it" or "Can't".
@@ -364,7 +406,7 @@ function requestCard(r) {
     ${callerLine(r)}
     <div class="addr">${esc(r.from)} → ${esc(r.to)}</div>
     <div class="addr"><b>${proposed ? `You offered ${minuteText(r.proposed_minute)}` : minuteText(r.window[0])}</b> · ${people(r)}</div>
-    ${proposed ? `<div class="times">They asked for <b>${minuteText(r.asked ?? r.window[0])}</b></div>` : r.asked != null && r.asked !== r.window[0] ? `<div class="times">First asked for <b>${minuteText(r.asked)}</b></div>` : ""}
+    ${timesLine(r, gpsFor(r))}
     ${proposed ? '<p class="quiet">The caller is asked to agree. Nothing to do now.</p>' : `
     <div class="actions">
       <button class="bad big" data-act="reject" data-id="${r.id}">Can't</button>
@@ -430,27 +472,67 @@ function ridesPane() {
   const others = today.rides || [];
   const waiting = reqs.filter((r) => r.status === "pending").length;
   const sub = `${waiting ? ` <span class="count">${waiting} new</span>` : ""}<button class="ghost small" data-add-ride>+ Add a ride</button>`;
-  if (!reqs.length && !others.length) return { empty: true, sub, html: '<div class="card"><p class="quiet">No requests yet today. A new one shows here and the phone rings.</p></div>' };
+  if (!reqs.length && !others.length) return { empty: true, sub, html: '<div class="card"><p class="quiet">No requests yet today. A new one shows here and the phone rings.</p></div><button class="ghost" data-finished>Finished rides, all days</button>' };
+  // Taken and on board first; the finished ones of today below them, and every earlier day behind one button
+  // (driver feedback, 2026-11-17: "should see all finished pickups").
+  const open = others.filter((r) => !FINISHED.includes(r.status));
+  const done = others.filter((r) => FINISHED.includes(r.status));
   return {
     sub,
-    html: `${reqs.map(requestCard).join("")}${others.length ? `<div class="card list">${others.map(rideRow).join("")}</div>` : ""}`,
+    html: `${reqs.map(requestCard).join("")}${open.length ? `<div class="card list">${open.map((r) => rideRow(r)).join("")}</div>` : ""}
+      ${done.length ? `<h3 class="pane-title">Finished today <span class="quiet">· ${done.length}</span></h3><div class="card list">${done.map((r) => rideRow(r)).join("")}</div>` : ""}
+      <button class="ghost" data-finished>Finished rides, all days</button>`,
   };
 }
+const FINISHED = ["completed", "rejected", "cancelled", "no_show"];
 // A ride of the day. Taken: Picked up, Done or Remove; on board: the drop-off time and Dropped off (driver feedback,
 // 2026-11-16: "in the car it still says the pickup time"; "remove or press done on a ride or a drop off").
-function rideRow(r) {
-  const finished = ["completed", "rejected", "cancelled", "no_show"].includes(r.status);
+// A finished ride of today can be opened again (driver feedback, 2026-11-17).
+function rideRow(r, reopen = true) {
+  const finished = FINISHED.includes(r.status);
   const onBoard = r.status === "picked_up";
   const time = onBoard && r.dropoff_eta != null ? r.dropoff_eta : r.window[0];
   const buttons = r.status === "accepted"
     ? `<div class="row-actions"><button class="ghost small" data-act="pickup" data-id="${r.id}">Picked up</button><button class="ghost small" data-act="done" data-id="${r.id}">Done</button><button class="bad small" data-act="cancel" data-id="${r.id}">Remove</button></div>`
-    : onBoard ? `<div class="row-actions"><button class="ghost small" data-act="done" data-id="${r.id}">Dropped off</button></div>` : "";
+    : onBoard ? `<div class="row-actions"><button class="ghost small" data-act="done" data-id="${r.id}">Dropped off</button></div>`
+    : finished && reopen ? `<div class="row-actions"><button class="ghost small" data-act="reopen" data-id="${r.id}">Open again</button></div>` : "";
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(time)}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
       <div><b>${esc(r.rider_name || "Ride")}</b> · ${people(r)}</div><div class="quiet">${esc(r.from)} → ${esc(r.to)}</div>
       ${callerLine(r)}
-      ${onBoard ? `<div class="times">Drop off${r.dropoff_eta != null ? ` about <b>${minuteText(r.dropoff_eta)}</b>` : ""}</div>` : finished ? "" : timesLine(r, r.status === "accepted" ? r.eta : null)}
+      ${timesLine(r, r.status === "accepted" ? r.eta : null)}
+      ${onBoard ? `<div class="times">Drop off${r.dropoff_eta != null ? ` about <b>${minuteText(r.dropoff_eta)}</b>` : ""}</div>` : ""}
       ${buttons}</div></div>`;
+}
+
+// Finished rides of any day (today and back), one day at a time.
+let finished = null; // { day, today, days: [{ day, n }], rides } from /api/driver/finished
+async function loadFinished(day) {
+  try {
+    const r = await api(`/api/driver/finished${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+    if (r.ok) finished = r.data;
+    else toast(errText(r.data));
+  } catch { toast("No signal. Try again when you have signal.", 4000); }
+  if (tab === "finished") render();
+}
+const finDayText = (day, todayDay) => {
+  if (day === todayDay) return "Today";
+  const d = new Date(`${day}T12:00:00Z`);
+  const yesterday = new Date(Date.parse(`${todayDay}T12:00:00Z`) - 864e5).toISOString().slice(0, 10);
+  if (day === yesterday) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+};
+function finishedView() {
+  if (!finished) return '<p class="quiet">Loading…</p>';
+  const days = [...new Set([finished.today, ...finished.days.map((x) => x.day)])].sort().reverse();
+  const i = days.indexOf(finished.day);
+  const older = i >= 0 ? days[i + 1] : null;
+  const newer = i > 0 ? days[i - 1] : null;
+  const isToday = finished.day === finished.today;
+  return `<h2>Finished rides · ${esc(finDayText(finished.day, finished.today))}</h2>
+    <div class="actions"><button class="ghost" data-fin-day="${esc(older || "")}" ${older ? "" : "disabled"}>◀ ${older ? esc(finDayText(older, finished.today)) : "Earlier"}</button>
+      <button class="ghost" data-fin-day="${esc(newer || "")}" ${newer ? "" : "disabled"}>${newer ? esc(finDayText(newer, finished.today)) : "Later"} ▶</button></div>
+    ${finished.rides.length ? `<div class="card list">${finished.rides.map((r) => rideRow(r, isToday)).join("")}</div>` : '<div class="card"><p class="quiet">No finished rides this day.</p></div>'}`;
 }
 
 function moreView() {
@@ -460,6 +542,7 @@ function moreView() {
     <button class="ghost big" data-late>Running late…</button>
     <button class="ghost big" data-sharing="${d.share_location ? "off" : "on"}">${d.share_location ? "Stop sharing my location" : "Share my location again"}</button>
     <p class="quiet">${d.share_location ? "Your location is shared only while you are at work, inside the service hours." : "Your location is not shared. The office can't see where you are."}</p>
+    <button class="ghost big" data-finished>Finished rides…</button>
     <button class="ghost big" data-tab-go="hours">My hours, days off and breaks</button>
     <button class="ghost big" data-add-ride>Add a ride…</button>
     <button class="ghost big" data-add-place>Add a place (address and code)…</button>
@@ -819,6 +902,8 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (ds.tab || ds.tabGo) { closeSheet(); tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
+  if (ds.finished != null) { closeSheet(); tab = "finished"; finished = null; render(); loadFinished(); return; }
+  if (ds.finDay) { await loadFinished(ds.finDay); return; }
   if (ds.schAdd != null) return scheduleSheet();
   if (ds.schKind) { schKind = ds.schKind; scheduleSheet(readSheet()); return; }
   if (ds.schSave != null) return saveSchedule();
@@ -851,15 +936,17 @@ document.addEventListener("click", async (e) => {
   if (ds.pause) { closeSheet(); await act("/api/driver/status", { status: "paused", minutes: Number(ds.pause) }, { ok: "Paused" }); return; }
   if (ds.act) {
     const id = ds.id;
-    const names = { pickup: "Picked up", done: "Done", no_show: "No-show", accept: "Taken", reject: "The caller is told", cancel: "Removed. The caller is told" };
+    const names = { pickup: "Picked up", done: "Done", no_show: "No-show", accept: "Taken", reject: "The caller is told", cancel: "Removed. The caller is told", reopen: "Opened again. Take it to give the caller a time" };
     if (ds.act === "no_show" && !(await ask("Nobody came? The seats are freed.", "No-show", true))) return;
     if (ds.act === "cancel" && !(await ask("Remove this ride? The caller is told it's cancelled.", "Remove", true))) return;
+    if (ds.act === "reopen" && !(await ask("Open this ride again? It comes back as a new request. Take it, and the caller is told the time.", "Open again"))) return;
     let reason = "";
     if (ds.act === "reject") { reason = await askReject(); if (reason == null) return; }
     closeSheet();
     const queueable = ["pickup", "done", "no_show"].includes(ds.act);
     if (queueable) { markLocal(id, { pickup: "picked_up", done: "completed", no_show: "no_show" }[ds.act]); render(); }
     await act(`/api/driver/bookings/${id}/${ds.act}`, ds.override ? { override: true } : reason ? { reason } : {}, { queueable, ok: names[ds.act] });
+    if (ds.act === "reopen" && tab === "finished") { tab = "next"; jumpToRequests = true; render(); }
     return;
   }
   if (ds.take) return take(ds.take);
