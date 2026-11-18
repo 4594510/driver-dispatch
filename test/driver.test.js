@@ -546,3 +546,29 @@ test("the driver app has what the office has: the hours calendar by week or mont
     assert.equal((await call(`/api/driver/bookings/${a}/address`, "POST", { key: "a4", end: "pickup", address: "3 Other St" })).body.errors[0], "same_place");
   });
 });
+
+test("driver feedback 2026-11-18: a Picked up pressed by mistake can be undone", async () => {
+  await withDay(async ({ call, db, setToken, at }) => {
+    await call("/api/admin/drivers/drv1/pin", "POST", { pin: "4321" });
+    setToken((await call("/api/driver/login", "POST", { phone: "8455550100", pin: "4321" })).body.token);
+    await call("/api/driver/status", "POST", { status: "online" });
+    const a = (await call("/api/admin/bookings", "POST", ride({ riderName: "A" }))).body.bookings[0].id;
+    await call(`/api/driver/bookings/${a}/accept`, "POST", { key: "a1" });
+    const before = db.prepare("SELECT count(*) n FROM deliveries").get().n;
+
+    // Undo before a pickup is refused; after one, the ride waits for its pickup again, its pickup back in the route.
+    assert.equal((await call(`/api/driver/bookings/${a}/unpickup`, "POST", { key: "u0" })).status, 400);
+    at("2026-11-11T17:05:00Z");
+    await call(`/api/driver/bookings/${a}/pickup`, "POST", { key: "p1" });
+    assert.equal((await call(`/api/driver/bookings/${a}/unpickup`, "POST", { key: "u1" })).status, 200);
+    const row = db.prepare("SELECT * FROM bookings WHERE id = ?").get(a);
+    assert.equal(row.status, "accepted");
+    assert.equal(row.picked_up_minute, null, "the pickup time is cleared");
+    const today = (await call("/api/driver/today")).body;
+    assert.equal(today.route.stops.find((s) => s.booking_id === a && s.kind === "pickup").status, "accepted");
+    assert.equal(db.prepare("SELECT count(*) n FROM deliveries").get().n, before, "nobody is called or texted");
+    // Picked up again for real.
+    assert.equal((await call(`/api/driver/bookings/${a}/pickup`, "POST", { key: "p2" })).status, 200);
+    assert.equal(db.prepare("SELECT status FROM bookings WHERE id = ?").get(a).status, "picked_up");
+  });
+});

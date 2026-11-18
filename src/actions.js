@@ -6,8 +6,9 @@ import { acceptRide, refreshDay } from "./dispatch.js";
 import { localParts } from "./rules.js";
 
 // The driver may also remove (cancel) a ride he took; the caller is told (driver feedback, 2026-11-16).
-// "reopen" opens a closed ride again as a new request (driver feedback, 2026-11-17).
-export const DRIVER_ACTIONS = ["accept", "reject", "propose", "pickup", "done", "no_show", "cancel", "reopen"];
+// "reopen" opens a closed ride again as a new request (driver feedback, 2026-11-17). "unpickup" undoes a "Picked up"
+// pressed by mistake: the ride waits for its pickup again, nobody is called (driver feedback, 2026-11-18).
+export const DRIVER_ACTIONS = ["accept", "reject", "propose", "pickup", "unpickup", "done", "no_show", "cancel", "reopen"];
 export const ADMIN_ACTIONS = DRIVER_ACTIONS;
 
 // Returns { ok, booking } or { ok: false, errors }.

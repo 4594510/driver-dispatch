@@ -212,9 +212,11 @@ const TRANSITIONS = {
   // A ride closed by mistake (done, cancelled, declined, no-show) is opened again as a new request; the driver then
   // takes it the usual way and the caller hears the time (driver feedback, 2026-11-17). Today's rides only.
   reopen: { from: ["completed", "cancelled", "rejected", "no_show"], to: "pending" },
+  // "Picked up" pressed by mistake: the ride is taken again, waiting for its pickup (driver feedback, 2026-11-18).
+  unpickup: { from: ["picked_up"], to: "accepted" },
 };
 
-// reject / cancel / pickup / done / no_show. Seats are freed simply by the status leaving the holding set.
+// reject / cancel / pickup / unpickup / done / no_show / reopen. Seats are freed simply by the status leaving the holding set.
 export function changeStatus(db, id, action, actor, now = new Date(), settings = DEFAULT_SETTINGS) {
   const t = TRANSITIONS[action];
   const b = getBooking(db, id);
@@ -230,6 +232,7 @@ export function changeStatus(db, id, action, actor, now = new Date(), settings =
     db.prepare(`UPDATE bookings SET picked_up_minute = NULL, dropped_off_minute = NULL, proposed_minute = NULL, seats = NULL,
       seat_override = 0, eta_minute = NULL, eta_dropoff_minute = NULL WHERE id = ?`).run(id);
   }
+  if (action === "unpickup") db.prepare("UPDATE bookings SET picked_up_minute = NULL WHERE id = ?").run(id);
   if (action === "pickup") db.prepare("UPDATE bookings SET picked_up_minute = ? WHERE id = ?").run(minute, id);
   if (action === "done") db.prepare("UPDATE bookings SET dropped_off_minute = ?, picked_up_minute = coalesce(picked_up_minute, ?) WHERE id = ?").run(minute, minute, id);
   audit(db, actor, action, id, { from: b.status });

@@ -152,6 +152,10 @@ function currentRoute(db, day, rides, ctx, layout) {
   let stops = (saved ? JSON.parse(saved.stops) : [])
     .map((s) => ({ ride: s.booking_id, kind: s.kind }))
     .filter((s) => byId.has(s.ride) && !(s.kind === "pickup" && byId.get(s.ride).onBoard));
+  // A "Picked up" undone (pressed by mistake) brings its pickup back: first, where the driver pressed it. The seats
+  // stay as they were while the riders counted as on board.
+  const back = rides.filter((r) => !r.onBoard && !stops.some((s) => s.ride === r.id && s.kind === "pickup") && stops.some((s) => s.ride === r.id && s.kind === "dropoff"));
+  stops = [...back.map((r) => ({ ride: r.id, kind: "pickup" })), ...stops];
   const covered = rides.every((r) => stops.some((s) => s.ride === r.id && s.kind === "dropoff"));
   if (covered) return stops;
   const built = buildRoute(rides, ctx, layout);
