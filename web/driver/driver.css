@@ -180,3 +180,5 @@ label.check input { width: auto; margin: 0; }
 .month .mday.past { opacity: 0.3; }
 .month .dbreak { color: var(--warn); }
 .add-stop { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Today's finished rides, opened with one button under the open rides (driver feedback, 2026-11-18). */
+.pane button.done-toggle { display: block; width: 100%; margin: 0 0 10px; text-align: left; }

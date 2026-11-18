@@ -20,6 +20,7 @@ let queue = store.get("driver.queue", []);
 let seenRequests = new Set(store.get("driver.seen", []));
 let lastOk = store.get("driver.lastOk");
 let reorder = null; // the route's order while the driver is moving stops
+let showDone = false; // today's finished rides open under the requests (closed by default, driver feedback 2026-11-18)
 let jumpToRequests = false; // a new request came: show the requests from the top
 let webSeen = null; // the app page version the server had when this page first loaded
 
@@ -339,6 +340,7 @@ function stopCard(s, big) {
       ${pickup ? `<button class="good huge-btn" data-act="pickup" data-id="${s.booking_id}">Picked up</button>`
         : via ? `<button class="good huge-btn" data-stop-done="${s.stop_id}">Done here</button>`
         : `<button class="good huge-btn" data-act="done" data-id="${s.booking_id}">Dropped off</button>`}
+      ${s.kind === "dropoff" ? `<button class="link" data-act="unpickup" data-id="${s.booking_id}">Not picked up yet (pressed by mistake)</button>` : ""}
       <div class="actions">
         <a href="${native ? navLink(s) : mapsWeb(s)}"><button class="ghost big" style="margin:0">Navigate</button></a>
         ${s.phone ? `<a href="tel:${esc(s.phone)}"><button class="ghost big" style="margin:0">Call</button></a>` : ""}
@@ -505,13 +507,15 @@ function ridesPane() {
   const sub = `${waiting ? ` <span class="count">${waiting} new</span>` : ""}<button class="ghost small" data-add-ride>+ Add a ride</button>`;
   if (!reqs.length && !others.length) return { empty: true, sub, html: '<div class="card"><p class="quiet">No requests yet today. A new one shows here and the phone rings.</p></div><button class="ghost" data-finished>Finished rides, all days</button>' };
   // Taken and on board first; the finished ones of today below them, and every earlier day behind one button
-  // (driver feedback, 2026-11-17: "should see all finished pickups").
+  // (driver feedback, 2026-11-17: "should see all finished pickups"). Today's finished ones open with one button and
+  // have no title that sticks: it covered the Requests title and the rides when scrolled (driver feedback, 2026-11-18).
   const open = others.filter((r) => !FINISHED.includes(r.status));
   const done = others.filter((r) => FINISHED.includes(r.status));
   return {
     sub,
     html: `${reqs.map(requestCard).join("")}${open.length ? `<div class="card list">${open.map((r) => rideRow(r)).join("")}</div>` : ""}
-      ${done.length ? `<h3 class="pane-title">Finished today <span class="quiet">· ${done.length}</span></h3><div class="card list">${done.map((r) => rideRow(r)).join("")}</div>` : ""}
+      ${done.length ? `<button class="ghost done-toggle" data-show-done>${showDone ? "▾ Hide" : "▸ Show"} finished today (${done.length})</button>
+        ${showDone ? `<div class="card list">${done.map((r) => rideRow(r)).join("")}</div>` : ""}` : ""}
       <button class="ghost" data-finished>Finished rides, all days</button>`,
   };
 }
@@ -525,7 +529,7 @@ function rideRow(r, reopen = true) {
   const time = onBoard && r.dropoff_eta != null ? r.dropoff_eta : r.window[0];
   const buttons = r.status === "accepted"
     ? `<div class="row-actions"><button class="ghost small" data-act="pickup" data-id="${r.id}">Picked up</button><button class="ghost small" data-act="done" data-id="${r.id}">Done</button><button class="bad small" data-act="cancel" data-id="${r.id}">Remove</button></div>`
-    : onBoard ? `<div class="row-actions"><button class="ghost small" data-act="done" data-id="${r.id}">Dropped off</button></div>`
+    : onBoard ? `<div class="row-actions"><button class="ghost small" data-act="done" data-id="${r.id}">Dropped off</button><button class="ghost small" data-act="unpickup" data-id="${r.id}">Not picked up yet</button></div>`
     : finished && reopen ? `<div class="row-actions"><button class="ghost small" data-act="reopen" data-id="${r.id}">Open again</button></div>` : "";
   return `<div class="stop ${finished ? "done" : ""}"><div class="time">${minuteText(time)}</div>
     <div class="body">${statusTag(r.status)}${r.return_of ? ' <span class="quiet">ride back</span>' : ""}
@@ -1053,6 +1057,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (ds.tab || ds.tabGo) { closeSheet(); tab = ds.tab || ds.tabGo; reorder = null; render(); if (tab === "hours") loadSchedule(); return; }
+  if (ds.showDone != null) { showDone = !showDone; render(); return; }
   if (ds.finished != null) { closeSheet(); tab = "finished"; finished = null; render(); loadFinished(); return; }
   if (ds.finDay) { await loadFinished(ds.finDay); return; }
   if (ds.schAdd != null) return scheduleSheet();
@@ -1087,10 +1092,24 @@ document.addEventListener("click", async (e) => {
   if (ds.pause) { closeSheet(); await act("/api/driver/status", { status: "paused", minutes: Number(ds.pause) }, { ok: "Paused" }); return; }
   if (ds.act) {
     const id = ds.id;
-    const names = { pickup: "Picked up", done: "Done", no_show: "No-show", accept: "Taken", reject: "The caller is told", cancel: "Removed. The caller is told", reopen: "Opened again. Take it to give the caller a time" };
+    const names = { pickup: "Picked up", done: "Done", no_show: "No-show", accept: "Taken", reject: "The caller is told", cancel: "Removed. The caller is told", reopen: "Opened again. Take it to give the caller a time", unpickup: "Back to waiting for the pickup" };
     if (ds.act === "no_show" && !(await ask("Nobody came? The seats are freed.", "No-show", true))) return;
     if (ds.act === "cancel" && !(await ask("Remove this ride? The caller is told it's cancelled.", "Remove", true))) return;
     if (ds.act === "reopen" && !(await ask("Open this ride again? It comes back as a new request. Take it, and the caller is told the time.", "Open again"))) return;
+    // "Picked up" pressed by mistake (driver feedback, 2026-11-18): the ride waits for its pickup again. A press still
+    // waiting for signal is just taken back.
+    if (ds.act === "unpickup") {
+      if (!(await ask("Not picked up yet? The ride goes back to waiting for its pickup. Nobody is called.", "Not picked up yet"))) return;
+      const waiting = queue.findIndex((q) => q.path === `/api/driver/bookings/${id}/pickup`);
+      if (waiting >= 0) {
+        queue.splice(waiting, 1);
+        store.set("driver.queue", queue);
+        markLocal(id, "accepted");
+        render();
+        toast(names.unpickup);
+        return;
+      }
+    }
     let reason = "";
     if (ds.act === "reject") { reason = await askReject(); if (reason == null) return; }
     closeSheet();

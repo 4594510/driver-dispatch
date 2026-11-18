@@ -127,6 +127,10 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   needs goes in the app. The app can also change a ride's pickup or drop-off (Change address; /api/driver/bookings/:id/address).
   Announcements show the weekday, date and time they were added; on the phone (menu 5) each says its day and time
   ("פון מאנטאג אום דריי נאכמיטאג").
+- Driver feedback (2026-11-18): "Picked up" pressed by mistake is undone with "Not picked up yet" (action unpickup:
+  on board back to taken, picked-up time cleared, nobody called; the pickup goes back first in the route, dispatch.js
+  currentRoute). Today's finished rides sit behind one "Show finished today" button, with no sticky title (it covered
+  the Requests title).
 
 ## Stack
 - Node 22.13+ with ES modules, Express 5, SQLite through node:sqlite (data/dispatch.db, not in git).

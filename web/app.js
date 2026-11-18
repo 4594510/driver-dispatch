@@ -166,6 +166,7 @@ function bookingButtons(b) {
     ["pending", "proposed"].includes(s) && btn("reject", "Reject", "danger"),
     s === "accepted" && btn("pickup", "Picked up"),
     ["accepted", "picked_up"].includes(s) && btn("done", "DONE", ""),
+    s === "picked_up" && btn("unpickup", "Not picked up yet"),
     s === "accepted" && btn("no_show", "No-show", "danger"),
     ["pending", "proposed", "accepted"].includes(s) && btn("edit", "Change address"),
     ["pending", "proposed", "accepted"].includes(s) && btn("cancel", "Cancel", "danger"),
