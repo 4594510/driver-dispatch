@@ -135,3 +135,33 @@ test("stops on the way are driven in order right before the drop-off, and a ride
   // A stop already done isn't in via any more; without stops the same trip is direct.
   assert.equal(timeRoute(stops, [ride("a", 0, 10, 600)], ctx).times[1].arrive, 610);
 });
+
+// Shloime, 2026-11-20: two pickups close together, drop-offs across town, were driven one whole ride after the other.
+test("two pickups close together going across town are both picked up before either drop-off", () => {
+  const c = { ...ctx, stopMinutes: 2 };
+  for (const later of [0, 10, 15]) {
+    const a = ride("a", 0, 20, 600);
+    const first = buildRoute([a], c);
+    const res = insertRide(first.stops, [a], ride("b", 1, 21, 600 + later), c);
+    assert.ok(res.ok, `b ${later} min later`);
+    assert.deepEqual(res.stops.map((s) => s.kind), ["pickup", "pickup", "dropoff", "dropoff"], `b ${later} min later`);
+    assert.deepEqual(res.timing.late, {});
+    assert.deepEqual(res.timing.over, {});
+  }
+});
+
+test("the driver starts later instead of keeping a rider waiting in the van for the next pickup", () => {
+  const c = { ...ctx, stopMinutes: 2 };
+  const rides = [ride("a", 0, 20, 600), ride("b", 1, 21, 615)];
+  const stops = [{ ride: "a", kind: "pickup" }, { ride: "b", kind: "pickup" }, { ride: "a", kind: "dropoff" }, { ride: "b", kind: "dropoff" }];
+  const t = timeRoute(stops, rides, c);
+  // a is picked up at 12, inside its window (to 15), and b right when its window opens at 15.
+  assert.deepEqual(t.times.map((x) => Math.round(x.arrive)), [612, 615, 636, 639]);
+  assert.deepEqual(t.over, {});
+  // Not past the end of a's window: then b waits a little, a stays home until 15.
+  const tight = timeRoute(stops, [ride("a", 0, 20, 600, { windowEnd: 605 }), rides[1]], c);
+  assert.equal(Math.round(tight.times[0].arrive), 605);
+  // A rider already on board is never held.
+  const onBoard = timeRoute(stops.slice(1), [ride("a", 0, 20, 600, { onBoard: true, pickedUpAt: 600 }), rides[1]], { ...c, start: { at: "0", minute: 600 } });
+  assert.equal(Math.round(onBoard.times[0].arrive), 615);
+});

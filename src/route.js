@@ -23,8 +23,53 @@ const EPS = 0.01;
 const PUSH_WEIGHT = 2;
 
 // ctx: { minutes(a, b, departMinute) -> { minutes, estimated }, stopMinutes, maxTrip, start?: { at, minute } }
+//
+// Riders are not kept waiting in the van (Shloime, 2026-11-20: two pickups close together, drop-offs across town, were
+// driven one after the other). When the van, empty, picks someone up and then has to wait at a later pickup for its
+// window to open, the driver instead starts that stretch later, as far as the earlier riders' windows allow: they wait
+// at home, not on board, so both can be picked up before either is dropped off.
 export function timeRoute(stops, rides, ctx) {
   const byId = new Map(rides.map((r) => [r.id, r]));
+  const hold = new Map(); // stop index -> the pickup starts no earlier than this
+  let timing = timeWith(stops, byId, rides, ctx, hold);
+  for (let round = 0; round < stops.length; round++) {
+    const h = nextHold(stops, byId, rides, timing);
+    if (!h) break;
+    hold.set(h.at, timing.times[h.at].arrive + h.by);
+    timing = timeWith(stops, byId, rides, ctx, hold);
+  }
+  return timing;
+}
+
+// The first wait on board that starting the stretch later would shorten: { at: the stretch's first stop, by: minutes }.
+// A stretch starts at a pickup with nobody in the van (riders already on board can't be held) and runs until it is
+// empty again; it can start later by the smallest room left in the windows of its pickups before the wait.
+function nextHold(stops, byId, rides, timing) {
+  let aboard = rides.filter((r) => r.onBoard && stops.some((s) => s.ride === r.id && s.kind === "dropoff")).length;
+  let start = aboard ? -1 : null; // -1: riders on board from the start, nothing to hold
+  let room = Infinity;
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    const r = byId.get(s.ride);
+    const t = timing.times[i];
+    if (s.kind === "pickup") {
+      if (aboard === 0) {
+        start = i;
+        room = Infinity;
+      } else if (start >= 0 && t.waited > EPS) {
+        const by = Math.min(t.waited, room);
+        if (by > 0.5) return { at: start, by };
+      }
+      room = Math.min(room, Math.max(0, r.windowEnd - t.arrive));
+      aboard++;
+    } else {
+      aboard--;
+    }
+  }
+  return null;
+}
+
+function timeWith(stops, byId, rides, ctx, hold) {
   const pickedAt = new Map(rides.filter((r) => r.onBoard).map((r) => [r.id, r.pickedUpAt ?? ctx.start?.minute ?? r.windowStart]));
   let pos = ctx.start?.at ?? undefined; // undefined: the driver starts at the first stop
   let t = ctx.start ? ctx.start.minute : null;
@@ -40,7 +85,7 @@ export function timeRoute(stops, rides, ctx) {
     estimated ||= leg.estimated;
     return t + leg.minutes;
   };
-  for (const s of stops) {
+  stops.forEach((s, i) => {
     const r = byId.get(s.ride);
     const at = s.kind === "pickup" ? r.from : r.to;
     // Stops on the way (stops.js): driven in order right before this ride's drop-off, the riders on board.
@@ -57,11 +102,11 @@ export function timeRoute(stops, rides, ctx) {
     const arrive = go(at, r.windowStart);
     let depart;
     if (s.kind === "pickup") {
-      const begin = Math.max(arrive, r.windowStart);
+      const begin = Math.max(arrive, r.windowStart, hold.get(i) ?? -Infinity);
       if (arrive > r.windowEnd + EPS) late[r.id] = arrive - r.windowEnd;
       pickedAt.set(r.id, begin);
       depart = begin + ctx.stopMinutes;
-      times.push({ arrive: begin, depart });
+      times.push({ arrive: begin, depart, waited: Math.max(0, r.windowStart - arrive) });
     } else {
       const onBoard = arrive - pickedAt.get(r.id);
       // A ride with stops on the way has no limit on board: the caller asked for the detour.
@@ -71,7 +116,7 @@ export function timeRoute(stops, rides, ctx) {
     }
     pos = at;
     t = depart;
-  }
+  });
   return { times, drive, estimated, late, over, end: t };
 }
 
