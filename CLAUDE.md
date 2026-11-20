@@ -61,6 +61,9 @@ The full plan, spec decisions and the phone setup live in the project's build pl
   (the drive from the stop before). A rider already taken whom a new ride still pushes 5+ minutes past the time they
   were told hears the new time (P45; dispatch.js MOVED_MINUTES, actions.js tellMoved; an "accepted" text not sent yet
   is rewritten instead).
+- Pickups close together, drop-offs far (Shloime, 2026-11-20: it drove one whole ride, then came back for the next):
+  a rider is not kept waiting in the van for a later pickup's window; the driver starts that stretch later, inside the
+  earlier riders' windows (route.js timeRoute hold, nextHold; never riders already on board), so both are picked up first.
 - A time the driver offers ("propose") is answered by the caller on the outgoing call or, when they call in, right
   after the greeting (P38a/P38b, step time_in): 1 agrees, 2 cancels the ride.
 - Messages about a ride that waited over an hour (phone line not connected or down) are dropped, never sent late
